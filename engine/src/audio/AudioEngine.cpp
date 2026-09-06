@@ -1,0 +1,301 @@
+#include <misuc/engine/audio/AudioEngine.h>
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+
+#include <misuc/engine/audio/PipeWireBackend.h>
+#include <misuc/engine/core/Logger.h>
+
+using misuc::core::logInfo;
+
+namespace misuc::engine {
+
+AudioEngine::AudioEngine(std::unique_ptr<AudioBackend> backend)
+    : backend_(std::move(backend ? std::move(backend)
+                                 : std::make_unique<PipeWireBackend>())),
+      controlQueue_(std::make_unique<ControlQueue>()) {
+  // ~5 ms fade coefficient at 48 kHz.
+  masterSmoother_.setCoefficient(0.004f);
+  meterL_.setDecaySeconds(0.35f, 0.30f);
+  meterR_.setDecaySeconds(0.35f, 0.30f);
+  setMasterGainDb(0.f);
+}
+
+bool AudioEngine::open(const AudioConfig& config, std::string& error) {
+  return backend_->open(config, error);
+}
+
+bool AudioEngine::start() {
+  // Reset real-time state once per session.
+  transport_.setSampleRate(sampleRate_);
+  transport_.setPosition(0);
+  transport_.pause();
+  state_ = PlayState::Stopped;
+  countPending_ = false;
+  metronome_.reset();
+  metronome_.setTicking(false);
+  metronome_.setSampleRate(sampleRate_);
+  metronome_.setTempo(transport_.tempo());
+  metronome_.setTimeSignature(transport_.timeSigNumerator(),
+                              transport_.timeSigDenominator());
+  tone_.setSampleRate(sampleRate_);
+  tone_.setFrequency(toneFreq_);
+  tone_.reset();
+  tone_.setWaveform(dsp::Waveform::Sine);
+  lastProcessPosition_ = 0;
+  snapshot_.clear();
+
+  const bool ok = backend_->start(*this);
+  if (!ok)
+    return false;
+  logInfo("Audio engine started on '%s' at %u Hz, %u-frame buffers.",
+          backend_->backendName().c_str(),
+          backendStatus().negotiatedRate, backendStatus().negotiatedBuffer);
+  return true;
+}
+
+void AudioEngine::closeAudio() { backend_->stop(); }
+
+bool AudioEngine::isRunning() const { return backend_->isRunning(); }
+
+BackendStatus AudioEngine::backendStatus() const { return backend_->status(); }
+
+LatencyInfo AudioEngine::latency() const { return backend_->latency(); }
+
+void AudioEngine::play(bool countIn) {
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::Transport);
+  m.f0 = static_cast<float>(TransportAction::Play);
+  m.f1 = countIn ? 1.f : 0.f;
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
+void AudioEngine::stop() {
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::Transport);
+  m.f0 = static_cast<float>(TransportAction::Stop);
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
+void AudioEngine::pause() {
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::Transport);
+  m.f0 = static_cast<float>(TransportAction::Pause);
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
+void AudioEngine::setTempo(double bpm) {
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::SetTempo);
+  m.d0 = bpm;
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
+void AudioEngine::setMetronome(bool enabled, float countInBeats) {
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::Metronome);
+  m.f0 = enabled ? 1.f : 0.f;
+  m.f1 = countInBeats;
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
+void AudioEngine::setTestTone(bool on) {
+  testTone_ = on;
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::TestTone);
+  m.f0 = on ? 1.f : 0.f;
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
+void AudioEngine::setMasterGainDb(float db) {
+  masterSmoother_.setTarget(dsp::gainFromDb(db));
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::MasterGain);
+  m.f0 = dsp::gainFromDb(db);
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
+bool AudioEngine::isTransportPlaying() const noexcept {
+  return snapshot_.playing.load(std::memory_order_relaxed);
+}
+
+uint64_t AudioEngine::playheadSamples() const noexcept {
+  return snapshot_.playheadSamples.load(std::memory_order_relaxed);
+}
+
+float AudioEngine::meterPeakL() const noexcept {
+  return snapshot_.peakL.load(std::memory_order_relaxed);
+}
+float AudioEngine::meterPeakR() const noexcept {
+  return snapshot_.peakR.load(std::memory_order_relaxed);
+}
+float AudioEngine::meterRmsL() const noexcept {
+  return snapshot_.rmsL.load(std::memory_order_relaxed);
+}
+float AudioEngine::meterRmsR() const noexcept {
+  return snapshot_.rmsR.load(std::memory_order_relaxed);
+}
+bool AudioEngine::meterClipped() const noexcept {
+  return snapshot_.clipped.load(std::memory_order_relaxed);
+}
+uint64_t AudioEngine::xruns() const noexcept {
+  return snapshot_.xruns.load(std::memory_order_relaxed);
+}
+
+void AudioEngine::drainControls() noexcept {
+  ControlMessage m;
+  while (controlQueue_->pop(m)) {
+    switch (static_cast<ControlKind>(m.type)) {
+      case ControlKind::Transport: {
+        const auto action = static_cast<TransportAction>(static_cast<int>(m.f0));
+        switch (action) {
+          case TransportAction::Play:
+            countPending_ = m.f1 > 0.f;
+            countInBeats_ = m.f1;
+            beginPlay();
+            break;
+          case TransportAction::Stop:
+            transport_.stop();
+            state_ = PlayState::Stopped;
+            metronome_.setTicking(false);
+            metronome_.clearCountIn();
+            snapshot_.playing.store(false, std::memory_order_relaxed);
+            break;
+          case TransportAction::Pause:
+            transport_.pause();
+            state_ = PlayState::Stopped;
+            metronome_.setTicking(false);
+            metronome_.clearCountIn();
+            snapshot_.playing.store(false, std::memory_order_relaxed);
+            break;
+        }
+        break;
+      }
+      case ControlKind::SetTempo:
+        transport_.setTempo(m.d0);
+        metronome_.setTempo(m.d0);
+        break;
+      case ControlKind::Metronome:
+        metronomeEnabled_ = m.f0 > 0.f;
+        metronome_.setEnabled(metronomeEnabled_);
+        metronome_.setVolume(0.9f);
+        break;
+      case ControlKind::TestTone:
+        testTone_ = m.f0 > 0.f;
+        if (!testTone_)
+          tone_.reset();
+        break;
+      case ControlKind::MasterGain:
+        masterSmoother_.setTarget(m.f0);
+        break;
+    }
+  }
+}
+
+void AudioEngine::beginPlay() noexcept {
+  if (countPending_ && metronomeEnabled_ && countInBeats_ > 0.f) {
+    state_ = PlayState::Counting;
+    metronome_.setTicking(true);
+    metronome_.beginCountIn(static_cast<uint32_t>(countInBeats_));
+    transport_.setPosition(0);
+    return;
+  }
+  state_ = PlayState::Playing;
+  transport_.setPosition(0);
+  transport_.play();
+  metronome_.setTicking(metronomeEnabled_);
+  snapshot_.playing.store(true, std::memory_order_relaxed);
+}
+
+void AudioEngine::renderTestTone(float* data, uint32_t frames,
+                                 uint32_t channels) noexcept {
+  // A balanced mono sine at moderate level for the Setup Wizard device test.
+  float lvl = 0.10f;
+  for (uint32_t i = 0; i < frames; ++i) {
+    const float s = tone_.nextSample() * lvl;
+    for (uint32_t c = 0; c < channels; ++c)
+      data[i * channels + c] += s;
+  }
+}
+
+void AudioEngine::process(float* data, uint32_t frames, uint32_t channels,
+                          uint64_t framePosition, double sampleRate) noexcept {
+  if (data == nullptr || frames == 0 || channels == 0)
+    return;
+
+  if (sampleRate_ != sampleRate) {
+    sampleRate_ = sampleRate;
+    transport_.setSampleRate(sampleRate);
+    metronome_.setSampleRate(sampleRate);
+    tone_.setSampleRate(sampleRate);
+    meterL_.setSampleRate(static_cast<float>(sampleRate));
+    meterR_.setSampleRate(static_cast<float>(sampleRate));
+    meterL_.setDecaySeconds(0.35f, 0.30f);
+    meterR_.setDecaySeconds(0.35f, 0.30f);
+  }
+  (void)framePosition;
+
+  drainControls();
+
+  std::fill(data, data + static_cast<size_t>(frames) * channels, 0.f);
+
+  if (state_ == PlayState::Playing) {
+    transport_.advance(frames);
+    metronome_.setTicking(metronomeEnabled_);
+    if (channels >= 2)
+      metronome_.render(&data[0], &data[1], frames, channels);
+    else
+      metronome_.render(&data[0], &data[0], frames, channels);
+    if (countPending_ && metronome_.countInComplete()) {
+      metronome_.clearCountIn();
+      countPending_ = false;
+    }
+  } else if (state_ == PlayState::Counting) {
+    // Count-in before the transport starts running.
+    metronome_.render(channels >= 2 ? &data[0] : &data[0],
+                      channels >= 2 ? &data[1] : &data[0], frames, channels);
+    if (metronome_.countInComplete()) {
+      state_ = PlayState::Playing;
+      countPending_ = false;
+      metronome_.clearCountIn();
+      transport_.play();
+      snapshot_.playing.store(true, std::memory_order_relaxed);
+    }
+  }
+
+  if (testTone_)
+    renderTestTone(data, frames, channels);
+
+  // Master bus gain (smoothed to avoid clicks) and metering.
+  for (uint32_t i = 0; i < frames; ++i) {
+    const float g = masterSmoother_.tick();
+    for (uint32_t c = 0; c < channels; ++c)
+      data[i * channels + c] *= g;
+  }
+
+  if (channels >= 2) {
+    meterL_.processInterleaved(data, channels, 0, frames);
+    meterR_.processInterleaved(data, channels, 1, frames);
+  }
+  snapshot_.peakL.store(meterL_.peak(), std::memory_order_relaxed);
+  snapshot_.peakR.store(meterR_.peak(), std::memory_order_relaxed);
+  snapshot_.rmsL.store(meterL_.rms(), std::memory_order_relaxed);
+  snapshot_.rmsR.store(meterR_.rms(), std::memory_order_relaxed);
+  snapshot_.clipped.store(meterL_.clipped() || meterR_.clipped(),
+                          std::memory_order_relaxed);
+  snapshot_.playheadSamples.store(transport_.positionFrames(),
+                                  std::memory_order_relaxed);
+  snapshot_.playing.store(state_ == PlayState::Playing,
+                          std::memory_order_relaxed);
+  snapshot_.xruns.store(backendStatus().xruns, std::memory_order_relaxed);
+}
+
+} // namespace misuc::engine

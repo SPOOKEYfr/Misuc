@@ -1,0 +1,10 @@
+build/
+build-*/
+*.o
+*.a
+*.so
+*.misuc~
+*.misuc-autosave
+.core
+compile_commands.json
+.cache/

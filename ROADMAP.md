@@ -416,10 +416,56 @@ be refined as development proceeds.
   harness runs **207 checks, ALL OK**, the app smoke-tests clean, and the
   build is warning-clean.
 
+## Phase 13 — UI foundation redesign: modular DAW shell (done)
+
+Per the master product spec §58 Phase 1 (UI foundation). Existing audio
+foundation untouched (engine suite still 54145 checks / 0 failures).
+
+- **Global header** (`HeaderBar`) replacing the nav rail: brand cluster
+  (note-flame mark + MISUC wordmark + live project name) left, transport
+  centred, live status cluster right — real **app CPU% and RAM** from
+  `/proc` (`/proc/self/task/*/stat` jiffies, `/proc/self/status` VmRSS),
+  sample rate, buffer + output latency, xruns, transport state, and two master
+  mini meters with clip flags.
+- **Tabbed central workspace** (`QTabWidget`): Project | Editor | Audio |
+  Appearance; the Mixer moved to a closable/floatable/movable **QDockWidget**
+  (bottom by default). Same widget creation order so the editor's track list
+  stays the window's first `QListWidget` (embedded-library contract intact).
+- **Hint system** (`HintSystem`): persistent left **HintBar** in the status
+  strip (name — description, live `[value]`, shortcut chip) driven by a
+  hover-event registry (`HintManager`) with a default hint; refreshed on the
+  UI poll tick. HintBar is registered over every major page.
+- **Theme engine expansion**: ~24 new semantic tokens (layered charcoal-glass
+  surfaces, text hierarchy, interactive states, chrome, editor + meter tokens);
+  QSS for dock/tab/toolbar/status/menu chrome; hard-coded hover/pressed colors
+  removed. Editor-neutral tokens keep stock values so note/clip rendering is
+  pixel-identical and the harness pixel checks stay green.
+- **Vector icon set** (`branding/Icons`): metronome, loop, count-in, settings,
+  audio, question glyphs painted from theme colors (no random Unicode).
+- **Metronome/count-in now real**: the transport click button arms
+  `engine_.setMetronome(on, countInBeats)` (previously the signal was never
+  consumed). Default off so playback/export stay click-free.
+- **Workspace menu + layout persistence**: Default / Mixing / Piano Roll /
+  Recording presets (real dock visibility + tab switches), F7 → Piano Roll,
+  F9 → toggle Mixer, Space → play/stop; dock layout, active tab, and window
+  size persist to QSettings.
+- **§57 audit fixes landed**: master-fader now persists (`Session` gains
+  additive `transport.masterGainDb`, v3-compatible; loaded with 0 dB default,
+  applied to the engine on every sync), PianoRoll's six hard-coded paint
+  colors tokenized (pixel-identical), and the first mixer strip follows the
+  theme accent instead of a fixed literal.
+- Planning artifact: `MISUC_UI_IMPLEMENTATION_PLAN.txt` (current + proposed
+  architecture, files changing/stable, migration, theme/workspace/plugin
+  architecture, packaging strategy, test strategy, §58 phase lanes).
+- Verification: engine **54145 / 0**, harness **213 ALL OK**, smoke rc=124
+  (alive), desktop-file-validate rc=0.
+
 ## Phase 8+ — Beyond
 
 - VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU
-  acceleration for the UI when it pays off.
+  acceleration for the UI when it pays off. Next milestones for the modular
+  shell per §58: desktop branding + .deb (P2), Browser (P3), Channel Rack
+  (P4), Playlist (P5).
 
 ## Status conventions
 

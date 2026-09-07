@@ -179,8 +179,32 @@ this queue at the top of each audio callback and applies changes.
 ## UI (`ui/`)
 
 The UI is a Qt 6 Widgets application (`misuc_app`) with a custom-painted
-premium dark theme. Layout comprises a menu bar (File / Edit), a top transport
-bar, sidebars, status area, and content pages.
+premium dark theme.
+
+### Modular workspace shell (Phase 13)
+
+`MainWindow` is a `QMainWindow` arranged as a modular DAW shell:
+
+- **Global header** (`HeaderBar`, a non-movable top `QToolBar`): brand cluster
+  (logo + MISUC wordmark + live project name) | centred compact `TransportBar`
+  | live status cluster (real app CPU % / RAM from `/proc`, sample rate,
+  buffer + latency, xruns, transport state, master mini meters).
+- **Central workspace**: a `QTabWidget` holding Project / Editor / Audio /
+  Appearance; page creation order (Project before Editor) preserves the
+  editor track-list as the window's first `QListWidget`.
+- **Dockable Mixer**: the mixer lives in a closable/floatable/movable
+  `QDockWidget` (bottom by default), shareable with future panels.
+- **HintBar** (`HintSystem`): a per-widget `HintManager` event filter +
+  registry surfaces name / description / live value / shortcut in the
+  `QStatusBar` hint label, refreshed on the 30 Hz UI poll.
+- **Workspace menu**: Default / Mixing / Piano Roll / Recording presets plus a
+  Mixer toggle; dock layout, active tab, and window size persist via
+  `QSettings`. Shortcuts: F7 Piano Roll, F9 Mixer toggle, Space play/stop.
+- Transport "click" is a real metronome: `countInToggled` → `engine_.setMetronome`.
+
+Screens refer only to theme tokens; a palette switch re-colors the whole app.
+
+### Main window menus and pages
 
 - **File menu**: New / Open... / Save / Save As... / Quit. The main window owns
   the `Session` document and a `core::UndoStack<Session>`; the Project page and

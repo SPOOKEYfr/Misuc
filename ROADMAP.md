@@ -291,6 +291,21 @@ be refined as development proceeds.
   strip (614 clip pixels, zero below), drag commits startBeats 2→4 under one
   undo snapshot with duration untouched, Del removes it with one commit, and
   clips survive a save/load round-trip.
+- File→Export Audio… (Ctrl+E): the File menu gains an action that computes the
+  project extent from notes and clips, breaks down / bounces the mixdown
+  through `AudioEngine::renderToWav` (clip+note score), stops and restores the
+  audio stream around the offline render, and writes a stereo WAV. Verified
+  end-to-end off the MainWindow: injected note+clip, trigger the action, read
+  back the WAV and check frames (8 beats → 192000 frames @120bpm), clip peak
+  in-beat, note region, the beat-4..6 gap staying silent, and the transport
+  still stopped. (Harness 142 checks.)
+- Clip editing on the lane: right-edge grip stretches `durationBeats`
+  (left edge + clipOffset fixed), left-edge grip trims-in (right edge fixed,
+  pushes `clipOffsetBeats` deeper into the source), Ctrl+D duplicates the
+  selected clip one snap step right with a fresh id, and the wheel over a clip
+  adjusts clip `gainDb` (±1 dB) with the same debounced undo snapshot as note
+  velocity. Edge grips get a resize cursor and hi-lite handles. (Harness 166
+  checks.)
 
 ## Phase 8+ — Beyond
 

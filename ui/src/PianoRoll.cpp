@@ -35,6 +35,8 @@ constexpr int kVelocityStep = 127 / 25; // one wheel notch
 constexpr int kVelocityCommitMs = 280;  // undo-snapshot debounce
 constexpr double kResizeGrabPx = 6.0;   // right-edge grab band, px
 constexpr double kMinDurationBeats = 0.1;
+constexpr double kMinClipDurationBeats = 0.25; // clip min length on the timeline
+constexpr float kClipGainStepDb = 1.0f;       // wheel step over a clip
 
 int pitchRowY(int pitch, int rowH) {
   return PianoRoll::kClipLaneH + (kHighPitch - pitch) * rowH;
@@ -260,6 +262,8 @@ public:
     // scroll burst produces exactly one undo snapshot.
     velocityTimer_.setSingleShot(true);
     connect(&velocityTimer_, &QTimer::timeout, this, [this] { owner_->commit(); });
+    clipGainTimer_.setSingleShot(true);
+    connect(&clipGainTimer_, &QTimer::timeout, this, [this] { owner_->commit(); });
   }
 
   QSize sizeHint() const override { return size(); }
@@ -339,6 +343,23 @@ public:
       if (clipRect(t->clips[i]).contains(pos))
         return static_cast<int>(i);
     return -1;
+  }
+
+  // 0 = body, 1 = trim-in (left edge), 2 = resize (right edge).
+  int clipEdgeGrip(const QPointF& pos) const {
+    const Track* t = track();
+    if (!t || pos.y() >= PianoRoll::kClipLaneH)
+      return 0;
+    for (size_t i = 0; i < t->clips.size(); ++i) {
+      const QRectF r = clipRect(t->clips[i]).adjusted(0, 2, 0, -2);
+      if (!r.contains(pos))
+        continue;
+      if (pos.x() >= r.right() - kResizeGrabPx)
+        return 2;
+      if (pos.x() <= r.left() + kResizeGrabPx)
+        return 1;
+    }
+    return 0;
   }
 
   // Decimated per-beat peak bins (16/beat, capped at 1024) for the clip's
@@ -425,6 +446,25 @@ public:
 
   void deleteNote(int index) {
     deleteNotes({index});
+    update();
+  }
+
+  // Duplicates the selected clip one snap step to the right of itself into a
+  // fresh clip (new id), selecting the copy, in a single undo snapshot.
+  void duplicateClip() {
+    Track* t = trackEdit();
+    if (!t || selectedClip_ < 0 ||
+        selectedClip_ >= static_cast<int>(t->clips.size()))
+      return;
+    AudioClip copy = t->clips[selectedClip_];
+    const double ns =
+        std::clamp(copy.startBeats + copy.durationBeats + kSnapBeats, 0.0,
+                   PianoRoll::kHorizonBeats - copy.durationBeats);
+    copy.id.clear(); // Session::addClip assigns a new unique id
+    copy.startBeats = ns;
+    owner_->session_.addClip(t->id, std::move(copy));
+    selectedClip_ = static_cast<int>(t->clips.size()) - 1;
+    owner_->commit();
     update();
   }
 
@@ -545,10 +585,21 @@ public:
   bool clipDragged_ = false;
   int clipDragIndex_ = -1;
   double clipDragOffsetBeats_ = 0.0;
+  // Clip edge gestures: clipResizeMode_ is 1 (trim-in, left edge) or 2
+  // (resize, right edge); anchors capture the pre-gesture geometry so both
+  // modes are undoable from one snapshot.
+  int clipResizeMode_ = 0;
+  bool clipResizing_ = false;
+  bool clipResized_ = false;
+  int clipResizeIndex_ = -1;
+  double clipResizeStart_ = 0.0;
+  double clipResizeDur_ = 0.0;
+  double clipResizeOffset_ = 0.0;
   std::map<std::string, WaveCache> waves_;
   double playheadBeats_ = -1.0;
   bool playheadVisible_ = false;
   QTimer velocityTimer_;
+  QTimer clipGainTimer_;
 
 protected:
   void paintEvent(QPaintEvent*) override {
@@ -606,6 +657,13 @@ protected:
           p.fillRect(QRectF(bx, wBot - vh, std::max(1.0, binW), vh),
                      QColor(0x6f, 0xb5, 0xde, amp > 0.f ? 190 : 60));
         }
+      }
+      if (sel) {
+        const double hx = 4.0;
+        p.setPen(Qt::NoPen);
+        p.setBrush(theme::kOk);
+        p.drawRect(QRectF(r.left() + 1.0, r.top() + 3.0, hx, r.height() - 6.0));
+        p.drawRect(QRectF(r.right() - hx - 1.0, r.top() + 3.0, hx, r.height() - 6.0));
       }
       const double nw = r.width() - 8;
       if (nw > 24) {
@@ -666,21 +724,39 @@ protected:
     if (e->button() == Qt::LeftButton) {
       const int chit = hitTestClip(pos);
       if (chit >= 0 || (pos.y() < PianoRoll::kClipLaneH && track())) {
-        // Pressing in the clip lane selects/drags the clip there (or clears
-        // clip selection on empty lane space); it never starts note gestures.
+        // Pressing in the clip lane operates on a clip (or clears clip
+        // selection on empty lane space); it never starts note gestures.
         selectedClip_ = chit;
         selected_ = -1;
         selectSet_.clear();
         if (chit >= 0) {
           const Track* t = track();
-          clipDragIndex_ = chit;
-          clipDragging_ = true;
-          clipDragged_ = false;
-          clipDragOffsetBeats_ =
-              xToBeat(pos.x()) - t->clips[chit].startBeats;
+          const int grip = clipEdgeGrip(pos);
+          if (grip != 0) {
+            // Edge gesture: trim-in (left) or resize (right).
+            clipResizeMode_ = grip;
+            clipResizing_ = true;
+            clipResized_ = false;
+            clipResizeIndex_ = chit;
+            const AudioClip& c = t->clips[chit];
+            clipResizeStart_ = c.startBeats;
+            clipResizeDur_ = c.durationBeats;
+            clipResizeOffset_ = c.clipOffsetBeats;
+            clipDragging_ = false;
+          } else {
+            clipResizeMode_ = 0;
+            clipResizing_ = false;
+            clipDragIndex_ = chit;
+            clipDragging_ = true;
+            clipDragged_ = false;
+            clipDragOffsetBeats_ =
+                xToBeat(pos.x()) - t->clips[chit].startBeats;
+          }
         } else {
           clipDragging_ = false;
           clipDragIndex_ = -1;
+          clipResizing_ = false;
+          clipResizeMode_ = 0;
         }
         update();
         return;
@@ -763,6 +839,47 @@ protected:
   }
 
   void mouseMoveEvent(QMouseEvent* e) override {
+    if (clipResizing_ && clipResizeMode_ != 0) {
+      Track* t = trackEdit();
+      if (t && clipResizeIndex_ >= 0 &&
+          clipResizeIndex_ < static_cast<int>(t->clips.size())) {
+        AudioClip& c = t->clips[clipResizeIndex_];
+        const double cur = snapped(xToBeat(e->position().x()));
+        if (clipResizeMode_ == 1) {
+          // Trim-in: keep the right edge fixed and push the trim offset
+          // deeper into the source as the left edge moves right.
+          const double right = clipResizeStart_ + clipResizeDur_;
+          const double maxStart = right - kMinClipDurationBeats;
+          const double start =
+              std::clamp(cur, 0.0, maxStart);
+          const double dur = right - start;
+          const double maxOffset = clipResizeOffset_ + clipResizeDur_ - dur;
+          const double off = std::clamp(
+              clipResizeOffset_ + (start - clipResizeStart_), 0.0,
+              maxOffset < 0 ? 0.0 : maxOffset);
+          if (std::fabs(start - c.startBeats) > 1e-6 ||
+              std::fabs(off - c.clipOffsetBeats) > 1e-6) {
+            c.startBeats = start;
+            c.durationBeats = dur;
+            c.clipOffsetBeats = off;
+            clipResized_ = true;
+            update();
+          }
+        } else {
+          // Resize: keep the left edge and trim offset fixed, change length.
+          double dur = cur - clipResizeStart_;
+          dur = std::clamp(dur, kMinClipDurationBeats,
+                           PianoRoll::kHorizonBeats - clipResizeStart_);
+          if (std::fabs(dur - c.durationBeats) > 1e-6) {
+            c.durationBeats = dur;
+            clipResized_ = true;
+            update();
+          }
+        }
+      }
+      e->accept();
+      return;
+    }
     if (clipDragging_) {
       Track* t = trackEdit();
       if (t && clipDragIndex_ >= 0 &&
@@ -869,14 +986,27 @@ protected:
       update();
       return;
     }
-    if (onResizeGrip(e->position()))
+    // Hover cursor: edge grip for notes, clip edge grip for the lane.
+    if (e->position().y() < PianoRoll::kClipLaneH && track()) {
+      const int cgrip = clipEdgeGrip(e->position());
+      setCursor(cgrip ? Qt::SizeHorCursor : Qt::ArrowCursor);
+    } else if (onResizeGrip(e->position())) {
       setCursor(Qt::SizeHorCursor);
-    else
+    } else {
       unsetCursor();
+    }
   }
 
   void mouseReleaseEvent(QMouseEvent* e) override {
     Q_UNUSED(e);
+    if (clipResizing_) {
+      clipResizing_ = false;
+      clipResizeMode_ = 0;
+      if (clipResized_)
+        owner_->commit();
+      clipResized_ = false;
+      return;
+    }
     if (clipDragging_) {
       clipDragging_ = false;
       clipDragIndex_ = -1;
@@ -957,6 +1087,11 @@ protected:
         return;
       }
       if (k == Qt::Key_D) {
+        if (selectedClip_ >= 0) {
+          duplicateClip();
+          e->accept();
+          return;
+        }
         copySelection();
         if (!clipboard_.empty())
           insertPasted(clipAnchor_ + kSnapBeats);
@@ -987,6 +1122,31 @@ protected:
       owner_->setZoom(owner_->pxPerBeat_ * factor);
       e->accept();
       return;
+    }
+    // Wheel over a selected clip on the lane changes its clip gain (dB),
+    // committed once the gesture settles so one burst = one undo snapshot.
+    if (!e->modifiers().testFlag(Qt::AltModifier) &&
+        e->position().y() < PianoRoll::kClipLaneH) {
+      const int chit = hitTestClip(e->position());
+      if (chit >= 0) {
+        Track* t = trackEdit();
+        if (t && chit < static_cast<int>(t->clips.size())) {
+          const int delta = e->angleDelta().y();
+          if (delta != 0) {
+            AudioClip& c = t->clips[chit];
+            selectedClip_ = chit;
+            selected_ = -1;
+            selectSet_.clear();
+            c.gainDb = std::clamp(
+                c.gainDb + (delta > 0 ? kClipGainStepDb : -kClipGainStepDb),
+                -60.0f, 24.0f);
+            clipGainTimer_.start(kVelocityCommitMs);
+            update();
+          }
+          e->accept();
+          return;
+        }
+      }
     }
     // Wheel over an existing note changes its velocity (audible immediately,
     // committed once the gesture settles); wheel elsewhere scrolls.

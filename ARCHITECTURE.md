@@ -199,6 +199,13 @@ gestures emit `PianoRoll::audition(freq, velocity)` (add / drag / click),
   (committed on release as one undo snapshot), and Del/Backspace or
   right-click delete it. Selecting a clip never starts note gestures; all note
   rows are shifted down by the lane and the piano-key ruler grows to match.
+  Clip editing on the lane (Phase 8+): a right-edge grip (6 px, `SizeHorCursor`)
+  stretches `durationBeats` keeping the left edge and `clipOffsetBeats` fixed,
+  a left-edge grip trims-in keeping the right edge fixed while pushing
+  `clipOffsetBeats` deeper into the source, Ctrl+D duplicates the selected clip
+  one snap step to the right (fresh id, inheriting offset/gain/edges), and the
+  wheel over a clip nudges clip `gainDb` by ±1 dB. Each gesture commits as a
+  single undo snapshot (gain uses the same debounce timer as note velocity).
 - **Import / record** (Phase 8): an "Import Audio…" button reads
   WAV/FLAC/OGG/AIFF through `WavFile::readAudioFile`, places the clip at the
   current playhead of the active track (staging the file into the project's

@@ -6,6 +6,7 @@ class QComboBox;
 class QLabel;
 class QPushButton;
 class QSlider;
+class QCheckBox;
 class QTimer;
 
 namespace misuc::engine {
@@ -18,8 +19,9 @@ class MeterWidget;
 
 // Real audio configuration page. Lists devices discovered from the live
 // PipeWire backend, lets the user choose sample rate / buffer size, starts and
-// stops the device, toggles the 440 Hz test tone, sets master gain, and shows
-// live meters, latency and xrun state. Everything here is wired to the engine.
+// stops the device, toggles the 440 Hz test tone, the groove, and input
+// monitoring, sets master/monitor gain, and shows live output + input meters,
+// latency and xrun state. Everything here is wired to the engine.
 class AudioSettingsPage : public QWidget {
   Q_OBJECT
 public:
@@ -30,6 +32,8 @@ private Q_SLOTS:
   void openDevice();
   void closeDevice();
   void toggleTestTone();
+  void toggleGroove();
+  void toggleMonitor();
   void poll();
 
 private:
@@ -41,6 +45,8 @@ private:
   QComboBox* inputDevices_ = nullptr;
   QComboBox* sampleRate_ = nullptr;
   QComboBox* bufferSize_ = nullptr;
+  QCheckBox* monitorChk_ = nullptr;
+  QCheckBox* grooveChk_ = nullptr;
 
   QPushButton* openBtn_ = nullptr;
   QPushButton* toneBtn_ = nullptr;
@@ -49,10 +55,15 @@ private:
   QLabel* deviceInfo_ = nullptr;
   QSlider* gainSlider_ = nullptr;
   QLabel* gainValue_ = nullptr;
+  QSlider* monitorSlider_ = nullptr;
+  QLabel* monitorValue_ = nullptr;
   MeterWidget* meter_ = nullptr;
+  MeterWidget* inMeter_ = nullptr;
   QTimer* timer_ = nullptr;
 
   bool toneOn_ = false;
+  bool grooveOn_ = false;
+  bool monitorOn_ = false;
 };
 
 } // namespace misuc::ui

@@ -12,6 +12,8 @@ enum class ControlKind : uint32_t {
   Metronome   = 3, // f0 = enabled, f1 = countInBeats
   TestTone    = 4, // f0 = enabled(0/1) [device test tone]
   MasterGain  = 5, // f0 = linear gain
+  Groove      = 6, // f0 = enabled(0/1)
+  MonitorGain = 7, // f0 = linear gain applied to input monitoring
 };
 
 struct alignas(8) ControlMessage {
@@ -30,10 +32,13 @@ enum class TransportAction : uint8_t { Play = 1, Stop = 2, Pause = 3 };
 class AudioRenderer {
 public:
   virtual ~AudioRenderer() = default;
-  // `data` is an F32 interleaved buffer (channels interleaved) with `frames`
-  // frames per channel. Must not allocate or block.
-  virtual void process(float* data, uint32_t frames, uint32_t channels,
-                       uint64_t framePosition, double sampleRate) noexcept = 0;
+  // `output` is an F32 interleaved buffer (outputChannels interleaved) of
+  // `frames` frames per channel; the realtime thread may fill it in place.
+  // `input` may be null (no capture stream). Must not allocate or block.
+  virtual void process(const float* input, uint32_t inputChannels,
+                       float* output, uint32_t outputChannels,
+                       uint32_t frames, uint64_t framePosition,
+                       double sampleRate) noexcept = 0;
 };
 
 } // namespace misuc::engine

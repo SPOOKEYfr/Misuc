@@ -17,11 +17,13 @@ struct AudioDeviceInfo {
 };
 
 struct AudioConfig {
-  std::string deviceId;   // empty = system default
-  bool input = false;     // true => device is a capture (source) node
+  std::string deviceId;        // output device node id (empty = system default)
+  std::string inputDeviceId;   // input (capture) node id (empty = no capture)
   uint32_t sampleRate = 48000;
-  uint32_t bufferSize = 256; // frames
-  uint32_t channels = 2;
+  uint32_t bufferSize = 256;   // frames
+  uint32_t channels = 2;       // output channels
+  uint32_t inputChannels = 2;
+  float monitorGainDb = 0.f;   // input monitoring level
 };
 
 struct LatencyInfo {
@@ -37,6 +39,7 @@ struct BackendStatus {
   uint32_t xruns = 0;
   uint32_t negotiatedRate = 0;
   uint32_t negotiatedChannels = 0;
+  uint32_t negotiatedInputChannels = 0;
   uint32_t negotiatedBuffer = 0; // frames in most recent buffer
   std::string error;
 };

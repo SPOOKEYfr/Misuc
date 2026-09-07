@@ -68,6 +68,9 @@ struct MeterSnapshot {
   std::atomic<float> rmsL{0.f};
   std::atomic<float> rmsR{0.f};
   std::atomic<bool>  clipped{false};
+  std::atomic<float> inPeak{0.f};
+  std::atomic<float> inRms{0.f};
+  std::atomic<bool>  inClipped{false};
   std::atomic<uint64_t> playheadSamples{0};
   std::atomic<bool>  playing{false};
   std::atomic<uint64_t> xruns{0};
@@ -80,6 +83,9 @@ struct MeterSnapshot {
     rmsL.store(0.f, std::memory_order_relaxed);
     rmsR.store(0.f, std::memory_order_relaxed);
     clipped.store(false, std::memory_order_relaxed);
+    inPeak.store(0.f, std::memory_order_relaxed);
+    inRms.store(0.f, std::memory_order_relaxed);
+    inClipped.store(false, std::memory_order_relaxed);
   }
 };
 

@@ -9,15 +9,23 @@
 
 #include <misuc/engine/audio/AudioBackend.h>
 
+// Forward declarations matching the PipeWire/SPA C types (in namespace ::).
 struct spa_hook;
 struct pw_registry;
 struct pw_thread_loop;
 struct pw_context;
 struct pw_core;
 struct pw_stream;
+struct pw_properties;
+struct spa_pod;
+struct spa_pod_builder;
 
 namespace misuc::engine {
 
+// Native PipeWire backend. Runs an output (playback) stream and - when an
+// input device is configured - a capture stream on the same thread loop.
+// Interleaved F32 throughout; capture arrives on the realtime thread and is
+// handed to the renderer for monitofring/metering.
 class PipeWireBackend final : public AudioBackend {
 public:
   PipeWireBackend();
@@ -37,37 +45,50 @@ public:
   std::string backendName() const override;
 
   // Called by PipeWire callbacks (public so the callback helpers can reach them).
-  void processCallback() noexcept;
-  void onParamChanged(uint32_t id, const void* param) noexcept;
-  void onStateChanged(int state, const char* error) noexcept;
+  void onOutputProcess() noexcept;
+  void onInputProcess() noexcept;
+  void onParamChanged(bool input, uint32_t id, const void* param) noexcept;
+  void onStateChanged(bool input, int state, const char* error) noexcept;
   void setStreamError(const std::string& error) noexcept;
   mutable std::mutex streamMutex_;
   std::condition_variable stateCv_;
 
 private:
   std::string streamErrorLocked() const;
+  bool createStreams(struct pw_properties* props, const struct spa_pod* const* params);
+
+  struct StreamSlot {
+    struct pw_stream* stream = nullptr;
+    struct spa_hook* hook = nullptr;
+    void* ctx = nullptr; // StreamCtx*
+    uint32_t channels = 0;
+    bool input = false;
+  };
 
   static constexpr std::size_t kMaxScratchFrames = 8192;
   static constexpr std::size_t kMaxScratchChannels = 8;
-  float scratch_[kMaxScratchChannels][kMaxScratchFrames];
+  float outScratch_[kMaxScratchChannels][kMaxScratchFrames];
+  float inScratch_[kMaxScratchChannels][kMaxScratchFrames];
 
   struct pw_thread_loop* loop_ = nullptr;
   struct pw_context* context_ = nullptr;
   struct pw_core* core_ = nullptr;
-  struct pw_stream* stream_ = nullptr;
-  struct spa_hook* streamHook_ = nullptr;
-  void* streamCtx_ = nullptr;
   bool loopStarted_ = false;
+
+  StreamSlot outSlot_;
+  StreamSlot inSlot_;
 
   AudioRenderer* renderer_ = nullptr;
   AudioConfig config_;
-  bool input_ = false;
   uint32_t channels_ = 2;
+  uint32_t inputChannels_ = 2;
   uint32_t sampleRate_ = 48000;
 
   std::atomic<bool> running_{false};
-  std::atomic<bool> stateReached_{false};
-  std::atomic<int> streamState_{0};
+  std::atomic<bool> stateReachedOut_{false};
+  std::atomic<bool> stateReachedIn_{false};
+  std::atomic<int> outState_{0};
+  std::atomic<int> inState_{0};
   std::string streamError_;
   bool streamWasError_ = false;
 
@@ -75,9 +96,12 @@ private:
   std::atomic<uint32_t> xruns_{0};
   std::atomic<uint32_t> negotiatedRate_{0};
   std::atomic<uint32_t> negotiatedChannels_{0};
+  std::atomic<uint32_t> negotiatedInputChannels_{0};
   std::atomic<uint32_t> negotiatedBuffer_{0};
   std::atomic<int64_t> lastProcessTimeNs_{-1};
   std::atomic<uint64_t> lastPosition_{0};
+  std::atomic<double> outDelayMs_{0.0};
+  std::atomic<double> inDelayMs_{0.0};
 };
 
 } // namespace misuc::engine

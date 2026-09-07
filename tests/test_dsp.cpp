@@ -4,11 +4,13 @@
 #include <cmath>
 
 #include <misuc/engine/dsp/Dsp.h>
+#include <misuc/engine/dsp/Groove.h>
 #include <misuc/engine/dsp/Metronome.h>
 #include <misuc/engine/dsp/Oscillator.h>
 
 using misuc::dsp::Biquad;
 using misuc::dsp::ChannelMeter;
+using misuc::dsp::Groove;
 using misuc::dsp::Oscillator;
 using misuc::dsp::Waveform;
 using misuc::engine::Metronome;
@@ -91,6 +93,54 @@ TEST_CASE(metronome_count_in_completes) {
   std::array<float, 48000> outR{};
   m.render(outL.data(), outR.data(), 48000, 1);
   TEST_ASSERT(m.countInComplete());
+}
+
+TEST_CASE(groove_disabled_is_silent) {
+  Groove g;
+  g.setSampleRate(48000);
+  g.setTempo(120);
+  std::array<float, 48000> outL{};
+  std::array<float, 48000> outR{};
+  g.render(outL.data(), outR.data(), 48000, 1, 0);
+  float maxAbs = 0.f;
+  for (float v : outL)
+    maxAbs = std::max(maxAbs, std::fabs(v));
+  TEST_ASSERT(maxAbs == 0.f);
+}
+
+TEST_CASE(groove_hits_have_energy) {
+  Groove g;
+  g.setSampleRate(48000);
+  g.setTempo(120); // beat = 24000 frames, sixteenth = 6000 frames
+  g.setEnabled(true);
+  std::array<float, 24000> outL{};
+  std::array<float, 24000> outR{};
+  g.render(outL.data(), outR.data(), 24000, 1, 0);
+  // Kick on beat 1 (transient in the first ~6000 frames).
+  float energyOn = 0.f;
+  for (size_t i = 0; i < 8192; ++i)
+    energyOn += std::fabs(outL[i]);
+  TEST_ASSERT(energyOn > 50.f);
+}
+
+TEST_CASE(groove_is_deterministic) {
+  Groove a;
+  a.setSampleRate(48000);
+  a.setTempo(120);
+  a.setEnabled(true);
+  Groove b;
+  b.setSampleRate(48000);
+  b.setTempo(120);
+  b.setEnabled(true);
+  std::array<float, 24000> outA{};
+  std::array<float, 48000> outB{};
+  a.render(outA.data(), outA.data(), 24000, 1, 0);
+  b.render(outB.data(), outB.data(), 24000, 2, 0);
+  for (size_t i = 0; i < 24000; ++i) {
+    // Stereo (stride 2) duplicates the mono (stride 1) signal on both channels.
+    TEST_ASSERT(std::fabs(outB[i * 2] - outA[i]) < 1e-4f);
+    TEST_ASSERT(std::fabs(outB[i * 2 + 1] - outA[i]) < 1e-4f);
+  }
 }
 
 TEST_CASE(meter_peak_and_rms) {

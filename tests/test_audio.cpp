@@ -51,3 +51,33 @@ TEST_CASE(stream_lifecycle) {
     TEST_ASSERT(!engine.isRunning());
   }
 }
+
+// Phase 3: groove must produce audible output while the transport plays, and
+// the engine must survive enabling/disabling it plus input capture config.
+// Daemon-gated like the other live tests.
+TEST_CASE(groove_and_capture_lifecycle) {
+  AudioEngine engine(std::make_unique<PipeWireBackend>());
+  AudioConfig cfg;
+  cfg.inputDeviceId = "2"; // any real or fake id; only checks it doesn't crash
+  std::string err;
+  if (!engine.open(cfg, err)) {
+    std::printf("  (no audio daemon; skipped)\n");
+    return;
+  }
+  const bool started = engine.start();
+  TEST_ASSERT(started);
+  if (!started) {
+    engine.closeAudio();
+    return;
+  }
+  engine.setGroove(true);
+  engine.play(false);
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));
+  const bool audible = engine.meterPeakL() > 0.01f || engine.meterRmsL() > 0.f;
+  engine.setGroove(false);
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  engine.stop();
+  TEST_ASSERT(audible);
+  engine.closeAudio();
+  TEST_ASSERT(!engine.isRunning());
+}

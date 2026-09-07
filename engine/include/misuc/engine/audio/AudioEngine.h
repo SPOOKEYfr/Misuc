@@ -10,6 +10,7 @@
 #include <misuc/engine/core/ControlStream.h>
 #include <misuc/engine/core/RingBuffer.h>
 #include <misuc/engine/dsp/Dsp.h>
+#include <misuc/engine/dsp/Groove.h>
 #include <misuc/engine/dsp/Metronome.h>
 #include <misuc/engine/dsp/Oscillator.h>
 #include <misuc/engine/transport/Transport.h>
@@ -42,8 +43,10 @@ public:
   void pause();
   void setTempo(double bpm);
   void setMetronome(bool enabled, float countInBeats);
+  void setGroove(bool enabled);
   void setTestTone(bool on);
   void setMasterGainDb(float db);
+  void setMonitorGainDb(float db);
 
   // UI poll snapshots (loads atomics).
   bool isTransportPlaying() const noexcept;
@@ -53,13 +56,17 @@ public:
   float meterRmsL() const noexcept;
   float meterRmsR() const noexcept;
   bool meterClipped() const noexcept;
+  float inMeterPeak() const noexcept;
+  float inMeterRms() const noexcept;
+  bool inMeterClipped() const noexcept;
   uint64_t xruns() const noexcept;
 
   Transport& transport() noexcept { return transport_; }
   const Transport& transport() const noexcept { return transport_; }
 
   // AudioRenderer (real-time thread). Never allocates or blocks.
-  void process(float* data, uint32_t frames, uint32_t channels,
+  void process(const float* input, uint32_t inputChannels, float* output,
+               uint32_t outputChannels, uint32_t frames,
                uint64_t framePosition, double sampleRate) noexcept override;
 
 private:
@@ -77,18 +84,23 @@ private:
   // Real-time state (only mutated on the audio thread).
   Transport transport_;
   Metronome metronome_;
+  dsp::Groove groove_;
   dsp::Oscillator tone_;
   PlayState state_ = PlayState::Stopped;
   bool countPending_ = false;
   float countInBeats_ = 0.f;
   bool testTone_ = false;
   bool metronomeEnabled_ = false;
+  bool grooveEnabled_ = false;
   double toneFreq_ = 440.0;
   double sampleRate_ = 48000.0;
   core::Smoother masterSmoother_;
+  core::Smoother monitorSmoother_;
+  float monitorGain_ = 0.f;
 
   dsp::ChannelMeter meterL_;
   dsp::ChannelMeter meterR_;
+  dsp::ChannelMeter inMeter_;
   core::MeterSnapshot snapshot_;
 
   uint64_t lastProcessPosition_ = 0;

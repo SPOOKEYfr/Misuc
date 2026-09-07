@@ -13,6 +13,8 @@ public:
 
   void setLevels(float peakL, float rmsL, float peakR, float rmsR, bool clipped);
 
+  void clear() { setLevels(0.f, 0.f, 0.f, 0.f, false); }
+
   QSize sizeHint() const override;
 
 protected:

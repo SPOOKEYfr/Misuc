@@ -17,9 +17,12 @@ AudioEngine::AudioEngine(std::unique_ptr<AudioBackend> backend)
       controlQueue_(std::make_unique<ControlQueue>()) {
   // ~5 ms fade coefficient at 48 kHz.
   masterSmoother_.setCoefficient(0.004f);
+  monitorSmoother_.setCoefficient(0.004f);
   meterL_.setDecaySeconds(0.35f, 0.30f);
   meterR_.setDecaySeconds(0.35f, 0.30f);
+  inMeter_.setDecaySeconds(0.35f, 0.30f);
   setMasterGainDb(0.f);
+  setMonitorGainDb(0.f);
 }
 
 bool AudioEngine::open(const AudioConfig& config, std::string& error) {
@@ -39,6 +42,12 @@ bool AudioEngine::start() {
   metronome_.setTempo(transport_.tempo());
   metronome_.setTimeSignature(transport_.timeSigNumerator(),
                               transport_.timeSigDenominator());
+  groove_.setSampleRate(sampleRate_);
+  groove_.setTempo(transport_.tempo());
+  groove_.setTimeSignature(transport_.timeSigNumerator(),
+                           transport_.timeSigDenominator());
+  groove_.setEnabled(grooveEnabled_);
+  groove_.reset();
   tone_.setSampleRate(sampleRate_);
   tone_.setFrequency(toneFreq_);
   tone_.reset();
@@ -105,6 +114,23 @@ void AudioEngine::setMetronome(bool enabled, float countInBeats) {
     controlsDropped_.fetch_add(1);
 }
 
+void AudioEngine::setGroove(bool enabled) {
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::Groove);
+  m.f0 = enabled ? 1.f : 0.f;
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
+void AudioEngine::setMonitorGainDb(float db) {
+  monitorGain_ = dsp::gainFromDb(db);
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::MonitorGain);
+  m.f0 = dsp::gainFromDb(db);
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
 void AudioEngine::setTestTone(bool on) {
   testTone_ = on;
   ControlMessage m;
@@ -146,6 +172,15 @@ float AudioEngine::meterRmsR() const noexcept {
 bool AudioEngine::meterClipped() const noexcept {
   return snapshot_.clipped.load(std::memory_order_relaxed);
 }
+float AudioEngine::inMeterPeak() const noexcept {
+  return snapshot_.inPeak.load(std::memory_order_relaxed);
+}
+float AudioEngine::inMeterRms() const noexcept {
+  return snapshot_.inRms.load(std::memory_order_relaxed);
+}
+bool AudioEngine::inMeterClipped() const noexcept {
+  return snapshot_.inClipped.load(std::memory_order_relaxed);
+}
 uint64_t AudioEngine::xruns() const noexcept {
   return snapshot_.xruns.load(std::memory_order_relaxed);
 }
@@ -182,11 +217,19 @@ void AudioEngine::drainControls() noexcept {
       case ControlKind::SetTempo:
         transport_.setTempo(m.d0);
         metronome_.setTempo(m.d0);
+        groove_.setTempo(m.d0);
         break;
       case ControlKind::Metronome:
         metronomeEnabled_ = m.f0 > 0.f;
         metronome_.setEnabled(metronomeEnabled_);
         metronome_.setVolume(0.9f);
+        break;
+      case ControlKind::Groove:
+        grooveEnabled_ = m.f0 > 0.f;
+        groove_.setEnabled(grooveEnabled_);
+        break;
+      case ControlKind::MonitorGain:
+        monitorSmoother_.setTarget(m.f0);
         break;
       case ControlKind::TestTone:
         testTone_ = m.f0 > 0.f;
@@ -226,42 +269,73 @@ void AudioEngine::renderTestTone(float* data, uint32_t frames,
   }
 }
 
-void AudioEngine::process(float* data, uint32_t frames, uint32_t channels,
-                          uint64_t framePosition, double sampleRate) noexcept {
-  if (data == nullptr || frames == 0 || channels == 0)
+void AudioEngine::process(const float* input, uint32_t inputChannels,
+                          float* output, uint32_t outputChannels,
+                          uint32_t frames, uint64_t framePosition,
+                          double sampleRate) noexcept {
+  if (output == nullptr || frames == 0 || outputChannels == 0)
     return;
 
   if (sampleRate_ != sampleRate) {
     sampleRate_ = sampleRate;
     transport_.setSampleRate(sampleRate);
     metronome_.setSampleRate(sampleRate);
+    groove_.setSampleRate(sampleRate);
     tone_.setSampleRate(sampleRate);
     meterL_.setSampleRate(static_cast<float>(sampleRate));
     meterR_.setSampleRate(static_cast<float>(sampleRate));
+    inMeter_.setSampleRate(static_cast<float>(sampleRate));
     meterL_.setDecaySeconds(0.35f, 0.30f);
     meterR_.setDecaySeconds(0.35f, 0.30f);
+    inMeter_.setDecaySeconds(0.35f, 0.30f);
   }
   (void)framePosition;
 
   drainControls();
 
-  std::fill(data, data + static_cast<size_t>(frames) * channels, 0.f);
+  std::fill(output, output + static_cast<size_t>(frames) * outputChannels, 0.f);
+
+  // Input monitoring (pre master gain) + capture metering.
+  if (input != nullptr && inputChannels > 0) {
+    const float g = monitorSmoother_.tick();
+    const uint32_t mix = outputChannels > 1 ? 2 : outputChannels;
+    for (uint32_t i = 0; i < frames; ++i) {
+      const float l = input[i * inputChannels];
+      const float r = inputChannels > 1 ? input[i * inputChannels + 1] : l;
+      if (mix > 1) {
+        output[i * outputChannels] += l * g;
+        output[i * outputChannels + 1] += r * g;
+      } else if (mix == 1) {
+        output[i] += 0.5f * (l + r) * g;
+      }
+    }
+    inMeter_.processInterleaved(const_cast<float*>(input), inputChannels, 0,
+                                frames);
+  }
+  snapshot_.inPeak.store(inMeter_.peak(), std::memory_order_relaxed);
+  snapshot_.inRms.store(inMeter_.rms(), std::memory_order_relaxed);
+  snapshot_.inClipped.store(inMeter_.clipped(), std::memory_order_relaxed);
 
   if (state_ == PlayState::Playing) {
+    const uint64_t startPos = transport_.positionFrames();
     transport_.advance(frames);
     metronome_.setTicking(metronomeEnabled_);
-    if (channels >= 2)
-      metronome_.render(&data[0], &data[1], frames, channels);
-    else
-      metronome_.render(&data[0], &data[0], frames, channels);
+    if (outputChannels >= 2) {
+      metronome_.render(&output[0], &output[1], frames, outputChannels);
+      groove_.render(&output[0], &output[1], frames, outputChannels, startPos);
+    } else {
+      metronome_.render(&output[0], &output[0], frames, outputChannels);
+      groove_.render(&output[0], &output[0], frames, outputChannels, startPos);
+    }
     if (countPending_ && metronome_.countInComplete()) {
       metronome_.clearCountIn();
       countPending_ = false;
     }
   } else if (state_ == PlayState::Counting) {
     // Count-in before the transport starts running.
-    metronome_.render(channels >= 2 ? &data[0] : &data[0],
-                      channels >= 2 ? &data[1] : &data[0], frames, channels);
+    metronome_.render(outputChannels >= 2 ? &output[0] : &output[0],
+                      outputChannels >= 2 ? &output[1] : &output[0], frames,
+                      outputChannels);
     if (metronome_.countInComplete()) {
       state_ = PlayState::Playing;
       countPending_ = false;
@@ -272,18 +346,18 @@ void AudioEngine::process(float* data, uint32_t frames, uint32_t channels,
   }
 
   if (testTone_)
-    renderTestTone(data, frames, channels);
+    renderTestTone(output, frames, outputChannels);
 
   // Master bus gain (smoothed to avoid clicks) and metering.
   for (uint32_t i = 0; i < frames; ++i) {
     const float g = masterSmoother_.tick();
-    for (uint32_t c = 0; c < channels; ++c)
-      data[i * channels + c] *= g;
+    for (uint32_t c = 0; c < outputChannels; ++c)
+      output[i * outputChannels + c] *= g;
   }
 
-  if (channels >= 2) {
-    meterL_.processInterleaved(data, channels, 0, frames);
-    meterR_.processInterleaved(data, channels, 1, frames);
+  if (outputChannels >= 2) {
+    meterL_.processInterleaved(output, outputChannels, 0, frames);
+    meterR_.processInterleaved(output, outputChannels, 1, frames);
   }
   snapshot_.peakL.store(meterL_.peak(), std::memory_order_relaxed);
   snapshot_.peakR.store(meterR_.peak(), std::memory_order_relaxed);

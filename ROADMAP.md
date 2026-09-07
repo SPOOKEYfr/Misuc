@@ -41,12 +41,29 @@ be refined as development proceeds.
 - Full suite builds green: `misuc_tests` 1869 checks, 0 failures; app runs
   cleanly on this machine.
 
-## Phase 3 — Real audio output & input
+## Phase 3 — Real audio output & input (done)
 
-- AudioEngine playback of generated audio (test tone already exists; extend to
-  render from the transport/metronome).
-- Capture path: input device → engine → metering, input monitor.
-- Round-trip latency verification with an audible + measurable method.
+- PipeWire dual-stream backend: output + optional capture, run from the same
+  `pw_thread_loop`. Stream config respects `inputChannels` / `inputDeviceId`.
+- Input monitoring: audio routed to output meters while transport runs, with a
+  separate monitor-gain control (range −60 to +6 dB).
+- Input metering (peak / RMS / clip) exposed through `AudioEngine` and shown in
+  the Audio Settings page alongside the output meter.
+- `Groove` synthesizer: deterministic kick/snare/hat/bass drum+synth pattern
+  locked to the transport position; toggled with a checkbox and audible through
+  the master output.
+- `AudioRenderer::process` extended with `(input, inputChannels, …)`.
+- `MeterSnapshot` extended with `inPeak / inRms / inClipped` fields.
+- `LatencyInfo` extended with `inputMs` and `roundTripMs`.
+- UI: input device picker (includes "None" option), monitor-gain slider,
+  monitor toggle, groove checkbox, input meter, latency display now shows
+  input delay.
+- Headless verification: open with `inputDeviceId=55`, input meter reads real
+  mic level (~0.2 peak), output peak from groove ~2.2, latency 385 ms
+  (large quantum). Teardown clean.
+- New groove unit tests: disabled = silent, hits carry energy, stride-1 vs
+  stride-2 render identical; live groove-and-capture lifecycle regression
+  added. Full suite stays green: 49874 checks, 0 failures.
 
 ## Phase 4 — Project workflow
 

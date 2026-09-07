@@ -101,6 +101,13 @@ void MixerPage::rebuildStrips() {
   for (ChannelStrip* s : strips_)
     s->deleteLater();
   strips_.clear();
+  if (auto* old = stripsHost_->layout()) {
+    while (QLayoutItem* item = old->takeAt(0)) {
+      delete item->widget();
+      delete item;
+    }
+    delete old;
+  }
 
   auto* lay = new QHBoxLayout(stripsHost_);
   lay->setContentsMargins(4, 4, 4, 4);

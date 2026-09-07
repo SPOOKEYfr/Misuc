@@ -105,7 +105,29 @@ be refined as development proceeds.
   add/drag/delete/snap/zoom/track-lifecycle/mute all pass; full suite green at
   49944 checks, 0 failures.
 
-## Phase 6+ — Beyond
+## Phase 6 — MIDI playback
+
+- Notes drawn in the piano roll make sound while the transport runs.
+
+## Phase 6 — MIDI playback (done)
+
+- New `dsp::MidiPlayer`: polyphonic subtractive MIDI voices re-synthesised as
+  a pure function of absolute sample time — no persistent voice state, so
+  blocks stitch seamlessly and stop/rewind/loop restart cleanly with zero
+  allocation on the audio thread.
+- Real-time-safe score handoff: the UI flattens the Session
+  (`buildMidiScore`: mute filtering, per-track gain + velocity baked into
+  amplitude) and publishes a snapshot through `AudioEngine::setScore` into a
+  triple buffer; the audio thread holds one slot per block, the publisher
+  round-robins three.
+- Score republished on every edit, undo/redo, open, and new — live edits
+  follow the transport instantly (mute, gain, moving notes).
+- Unit tests cover pitch→freq, attack/release envelope, seamless block
+  boundaries (bit-identical), deterministic rewinds, polyphonic summation,
+  tempo scaling, and score mapping; a live daemon test confirms MIDI-alone
+  playback is audible. Suite: 53989 checks, 0 failures.
+
+## Phase 7+ — Beyond
 
 - VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU
   acceleration for the UI when it pays off.

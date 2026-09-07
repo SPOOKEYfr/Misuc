@@ -19,6 +19,7 @@
 #include <QPainter>
 
 #include <misuc/engine/audio/AudioEngine.h>
+#include <misuc/engine/audio/MidiScore.h>
 
 #include "AudioSettingsPage.h"
 #include "EditorPage.h"
@@ -97,6 +98,7 @@ MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
 
   // Seed the undo history so the first edit has something to revert to.
   undo_.push(session_);
+  rebuildMidiScore();
 
   // Poll transport + status at 30 Hz.
   timer_ = new QTimer(this);
@@ -159,9 +161,16 @@ void MainWindow::onSessionEdited() {
   undo_.push(session_);
   dirty_ = true;
   applyTempoToEngine();
+  rebuildMidiScore();
   undoCmd_->setEnabled(undo_.canUndo());
   redoCmd_->setEnabled(undo_.canRedo());
   updateWindowTitle();
+}
+
+void MainWindow::rebuildMidiScore() {
+  std::vector<misuc::dsp::MidiNote> notes;
+  misuc::engine::buildMidiScore(session_, notes);
+  engine_.setScore(std::move(notes));
 }
 
 void MainWindow::poll() {
@@ -193,6 +202,7 @@ void MainWindow::newProject() {
   projectPage_->refresh();
   editorPage_->refresh();
   applyTempoToEngine();
+  rebuildMidiScore();
   undoCmd_->setEnabled(false);
   redoCmd_->setEnabled(false);
   updateWindowTitle();
@@ -229,6 +239,7 @@ void MainWindow::openProject(const QString& path) {
   projectPage_->refresh();
   editorPage_->refresh();
   applyTempoToEngine();
+  rebuildMidiScore();
   undoCmd_->setEnabled(false);
   redoCmd_->setEnabled(false);
   updateWindowTitle();
@@ -269,6 +280,7 @@ void MainWindow::performUndo() {
   projectPage_->refresh();
   editorPage_->refresh();
   applyTempoToEngine();
+  rebuildMidiScore();
   dirty_ = true;
   undoCmd_->setEnabled(undo_.canUndo());
   redoCmd_->setEnabled(undo_.canRedo());
@@ -282,6 +294,7 @@ void MainWindow::performRedo() {
   projectPage_->refresh();
   editorPage_->refresh();
   applyTempoToEngine();
+  rebuildMidiScore();
   dirty_ = true;
   undoCmd_->setEnabled(undo_.canUndo());
   redoCmd_->setEnabled(undo_.canRedo());

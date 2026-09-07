@@ -50,6 +50,7 @@ private:
   void performUndo();
   void performRedo();
   void applyTempoToEngine();
+  void rebuildMidiScore();
   void updateWindowTitle();
 
   // Ask about unsaved changes. Returns false when the user cancelled.

@@ -5,6 +5,7 @@ add_executable(misuc_tests
   test_json.cpp
   test_transport.cpp
   test_dsp.cpp
+  test_midi.cpp
   test_logger.cpp
   test_undo.cpp
   test_audio.cpp)

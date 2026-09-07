@@ -69,6 +69,11 @@ this queue at the top of each audio callback and applies changes.
 - `Groove.h` — deterministic drum + bass groove (kick/snare/hat/bass) quantized
   to a 16th-note grid; `render(outL, outR, frames, stride, startFrame)` where
   `startFrame` is the transport position, so the music locks to the playhead.
+- `Midi.h` — polyphonic MIDI playback: a bare score entry (`MidiNote`, beats +
+  frequency + baked amplitude) and `MidiPlayer`, which re-synthesizes each
+  block as a pure function of absolute sample time. No persistent voice state,
+  so blocks stitch seamlessly and stop/rewind/loop restart cleanly with zero
+  allocation on the audio thread.
 
 ### transport
 
@@ -145,6 +150,10 @@ bar, sidebars, status area, and content pages.
   controls master and monitor gain, and shows live output/input meters with
   clip LEDs.
 
+- `MidiScore.h` — `buildMidiScore(Session, score)`: flattens a session into a
+  sorted playback score (mute filtering, per-track gain + velocity baked into
+  amplitude) for the UI to publish via `AudioEngine::setScore`.
+
 The UI talks only to `AudioEngine` (and through it the backend interface); it
 never touches PipeWire directly.
 
@@ -157,6 +166,8 @@ PipeWire process callback(s)
 AudioEngine::process (AudioRenderer; input + output)
         │  drain ControlQueue (lock-free, from CPU thread)
         │  count-in metronome / test tone / groove (transport-quantized)
+        │  MIDI score player (stateless re-synthesis from a real-time-safe
+        │  triple-buffer snapshot published by the UI on every edit)
         │  monitored input → monitor gain smoother → output bus
         │  master-gain smoothing
         │  gather output + input MeterSnapshot

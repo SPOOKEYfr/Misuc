@@ -55,6 +55,45 @@ TEST_CASE(stream_lifecycle) {
 // Phase 3: groove must produce audible output while the transport plays, and
 // the engine must survive enabling/disabling it plus input capture config.
 // Daemon-gated like the other live tests.
+// Phase 6: the piano-roll score must actually sound while the transport plays,
+// through the real-time triple-buffer handoff. Daemon-gated like the others.
+TEST_CASE(midi_playback_lifecycle) {
+  AudioEngine engine(std::make_unique<PipeWireBackend>());
+  AudioConfig cfg;
+  std::string err;
+  if (!engine.open(cfg, err)) {
+    std::printf("  (no audio daemon; skipped)\n");
+    return;
+  }
+  engine.setGroove(false); // MIDI alone must be audible
+  std::vector<misuc::dsp::MidiNote> notes;
+  notes.push_back({0.0, 1.0, misuc::dsp::midiNoteToFreq(55), 0.6f});
+  notes.push_back({1.0, 1.0, misuc::dsp::midiNoteToFreq(60), 0.6f});
+  notes.push_back({2.0, 1.0, misuc::dsp::midiNoteToFreq(55), 0.6f});
+  notes.push_back({3.0, 1.0, misuc::dsp::midiNoteToFreq(62), 0.6f});
+  engine.setScore(std::move(notes));
+
+  const bool started = engine.start();
+  TEST_ASSERT(started);
+  if (!started) {
+    engine.closeAudio();
+    return;
+  }
+  engine.play(false);
+  std::this_thread::sleep_for(std::chrono::milliseconds(90));
+  const bool audible =
+      engine.meterPeakL() > 0.01f || engine.meterRmsL() > 0.f;
+  engine.stop();
+  engine.clearScore();
+  engine.closeAudio();
+  TEST_ASSERT(!engine.isRunning());
+  TEST_ASSERT(audible);
+  std::printf("  midi playback peak %.3f\n", engine.meterPeakL());
+}
+
+// Phase 3: groove must produce audible output while the transport plays, and
+// the engine must survive enabling/disabling it plus input capture config.
+// Daemon-gated like the other live tests.
 TEST_CASE(groove_and_capture_lifecycle) {
   AudioEngine engine(std::make_unique<PipeWireBackend>());
   AudioConfig cfg;

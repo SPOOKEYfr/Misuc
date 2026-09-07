@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <misuc/engine/audio/AudioBackend.h>
 #include <misuc/engine/core/ControlStream.h>
@@ -12,6 +13,7 @@
 #include <misuc/engine/dsp/Dsp.h>
 #include <misuc/engine/dsp/Groove.h>
 #include <misuc/engine/dsp/Metronome.h>
+#include <misuc/engine/dsp/Midi.h>
 #include <misuc/engine/dsp/Oscillator.h>
 #include <misuc/engine/transport/Transport.h>
 
@@ -47,6 +49,12 @@ public:
   void setTestTone(bool on);
   void setMasterGainDb(float db);
   void setMonitorGainDb(float db);
+
+  // Publish a fresh MIDI playback score from any non-RT thread (e.g. when the
+  // user edits notes). Handed to the audio thread via a real-time-safe
+  // triple buffer; cheap enough to call on every committed edit.
+  void setScore(std::vector<dsp::MidiNote> notes);
+  void clearScore();
 
   // UI poll snapshots (loads atomics).
   bool isTransportPlaying() const noexcept;
@@ -102,6 +110,18 @@ private:
   dsp::ChannelMeter meterR_;
   dsp::ChannelMeter inMeter_;
   core::MeterSnapshot snapshot_;
+
+  // MIDI playback score + stateless polyphonic player. The audio thread holds
+  // at most one slot (refs + 1) per block; the publisher round-robins three
+  // slots and only writes a slot once its readers have left.
+  struct ScoreSlot {
+    std::vector<dsp::MidiNote> notes;
+    std::atomic<int> refs{0};
+  };
+  ScoreSlot scoreSlots_[3];
+  std::atomic<int> liveSlot_{-1};
+  int publishSlot_ = 0;
+  dsp::MidiPlayer midiPlayer_;
 
   uint64_t lastProcessPosition_ = 0;
 };

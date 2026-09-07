@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <thread>
 
 #include <misuc/engine/audio/PipeWireBackend.h>
 #include <misuc/engine/core/Logger.h>
@@ -52,6 +53,9 @@ bool AudioEngine::start() {
   tone_.setFrequency(toneFreq_);
   tone_.reset();
   tone_.setWaveform(dsp::Waveform::Sine);
+  midiPlayer_.setSampleRate(sampleRate_);
+  midiPlayer_.setTempo(transport_.tempo());
+  midiPlayer_.reset();
   lastProcessPosition_ = 0;
   snapshot_.clear();
 
@@ -149,6 +153,24 @@ void AudioEngine::setMasterGainDb(float db) {
     controlsDropped_.fetch_add(1);
 }
 
+void AudioEngine::setScore(std::vector<dsp::MidiNote> notes) {
+  const int c = publishSlot_;
+  publishSlot_ = (publishSlot_ + 1) % 3;
+  ScoreSlot& slot = scoreSlots_[c];
+  // Wait until the audio thread (if it holds this slot) is done with it. The
+  // audio thread only ever holds one slot for the duration of one process()
+  // block, so this spin is bounded and effectively never waits.
+  while (slot.refs.load(std::memory_order_acquire) != 0)
+    std::this_thread::yield();
+  slot.notes = std::move(notes);
+  std::atomic_thread_fence(std::memory_order_release);
+  liveSlot_.store(c, std::memory_order_release);
+}
+
+void AudioEngine::clearScore() {
+  setScore(std::vector<dsp::MidiNote>());
+}
+
 bool AudioEngine::isTransportPlaying() const noexcept {
   return snapshot_.playing.load(std::memory_order_relaxed);
 }
@@ -202,6 +224,7 @@ void AudioEngine::drainControls() noexcept {
             state_ = PlayState::Stopped;
             metronome_.setTicking(false);
             metronome_.clearCountIn();
+            midiPlayer_.reset();
             snapshot_.playing.store(false, std::memory_order_relaxed);
             break;
           case TransportAction::Pause:
@@ -209,6 +232,7 @@ void AudioEngine::drainControls() noexcept {
             state_ = PlayState::Stopped;
             metronome_.setTicking(false);
             metronome_.clearCountIn();
+            midiPlayer_.reset();
             snapshot_.playing.store(false, std::memory_order_relaxed);
             break;
         }
@@ -218,6 +242,7 @@ void AudioEngine::drainControls() noexcept {
         transport_.setTempo(m.d0);
         metronome_.setTempo(m.d0);
         groove_.setTempo(m.d0);
+        midiPlayer_.setTempo(m.d0);
         break;
       case ControlKind::Metronome:
         metronomeEnabled_ = m.f0 > 0.f;
@@ -255,6 +280,7 @@ void AudioEngine::beginPlay() noexcept {
   transport_.setPosition(0);
   transport_.play();
   metronome_.setTicking(metronomeEnabled_);
+  midiPlayer_.reset();
   snapshot_.playing.store(true, std::memory_order_relaxed);
 }
 
@@ -282,6 +308,7 @@ void AudioEngine::process(const float* input, uint32_t inputChannels,
     metronome_.setSampleRate(sampleRate);
     groove_.setSampleRate(sampleRate);
     tone_.setSampleRate(sampleRate);
+    midiPlayer_.setSampleRate(sampleRate);
     meterL_.setSampleRate(static_cast<float>(sampleRate));
     meterR_.setSampleRate(static_cast<float>(sampleRate));
     inMeter_.setSampleRate(static_cast<float>(sampleRate));
@@ -326,6 +353,19 @@ void AudioEngine::process(const float* input, uint32_t inputChannels,
     } else {
       metronome_.render(&output[0], &output[0], frames, outputChannels);
       groove_.render(&output[0], &output[0], frames, outputChannels, startPos);
+    }
+    const int slot = liveSlot_.load(std::memory_order_acquire);
+    if (slot >= 0) {
+      ScoreSlot& scoreSlot = scoreSlots_[slot];
+      scoreSlot.refs.fetch_add(1, std::memory_order_relaxed);
+      if (outputChannels >= 2) {
+        midiPlayer_.render(scoreSlot.notes, &output[0], &output[1], frames,
+                           outputChannels, startPos);
+      } else {
+        midiPlayer_.render(scoreSlot.notes, &output[0], &output[0], frames,
+                           outputChannels, startPos);
+      }
+      scoreSlot.refs.fetch_sub(1, std::memory_order_release);
     }
     if (countPending_ && metronome_.countInComplete()) {
       metronome_.clearCountIn();

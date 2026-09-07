@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 
+#include <algorithm>
 #include <memory>
 #include <utility>
 
@@ -17,6 +18,7 @@
 #include <QMessageBox>
 #include <QPushButton>
 #include <QStackedWidget>
+#include <QStatusBar>
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QPainter>
@@ -145,12 +147,17 @@ void MainWindow::buildMenus() {
       QStringLiteral("Save &As..."), this, &MainWindow::saveProjectAs,
       QKeySequence::SaveAs);
   file->addSeparator();
+  QAction* exportAct = file->addAction(
+      QStringLiteral("Export &Audio..."), this, &MainWindow::exportAudio,
+      QKeySequence(Qt::CTRL | Qt::Key_E));
+  file->addSeparator();
   file->addAction(QStringLiteral("&Quit"), this, &QWidget::close,
                   QKeySequence::Quit);
   Q_UNUSED(newAct);
   Q_UNUSED(openAct);
   Q_UNUSED(saveAct);
   Q_UNUSED(saveAsAct);
+  Q_UNUSED(exportAct);
 
   QMenu* edit = menuBar()->addMenu(QStringLiteral("&Edit"));
   undoCmd_ = edit->addAction(QStringLiteral("&Undo"), this,
@@ -166,9 +173,10 @@ void MainWindow::buildMenus() {
 void MainWindow::buildPages() {
   projectPage_ = new ProjectPage(session_, this);
   editorPage_ = new EditorPage(session_, this);
+  audioSettings_ = new AudioSettingsPage(engine_, this);
   pages_->addWidget(projectPage_);
   pages_->addWidget(editorPage_);
-  pages_->addWidget(new AudioSettingsPage(engine_, this));
+  pages_->addWidget(audioSettings_);
 
   editorPage_->importAudioSink = [this](const QString& src) {
     return stageAudioFile(src);
@@ -279,6 +287,65 @@ void MainWindow::onRecordToggled(bool on) {
   c.channels = 1;
   session_.addClip(tid, std::move(c));
   onSessionEdited();
+}
+
+void MainWindow::exportAudio() {
+  // Offline bounce must not race the live stream: pause the transport, stop
+  // the device, render to disk, then restore the stream we stopped.
+  const bool wasRunning = engine_.isRunning();
+  const bool wasPlaying = engine_.isTransportPlaying();
+  if (wasRunning) {
+    if (wasPlaying)
+      engine_.pause();
+    engine_.closeAudio();
+  }
+  auto restore = [this, wasRunning] {
+    if (wasRunning)
+      audioSettings_->restartStream();
+  };
+
+  QString path = exportPathOverride_;
+  if (path.isEmpty()) {
+    const QString home = projectPath_.isEmpty()
+                             ? QDir::homePath()
+                             : QFileInfo(projectPath_).absolutePath();
+    const QString base = projectPath_.isEmpty()
+                             ? QStringLiteral("untitled")
+                             : QFileInfo(projectPath_).completeBaseName();
+    path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("Export audio"),
+        QDir(home).filePath(base + QStringLiteral("-export.wav")),
+        QStringLiteral("WAV audio (*.wav)"));
+    if (path.isEmpty()) {
+      restore();
+      return;
+    }
+    if (!path.endsWith(QStringLiteral(".wav"), Qt::CaseInsensitive))
+      path += QStringLiteral(".wav");
+  }
+
+  // Bounce the extent that contains all arranged material (notes, clips, loop
+  // region), with a minimum of one bar.
+  double endBeats = 4.0;
+  for (const auto& tr : session_.tracks()) {
+    for (const auto& n : tr.notes)
+      endBeats = std::max(endBeats, n.startBeats + n.durationBeats);
+    for (const auto& c : tr.clips)
+      endBeats = std::max(endBeats, c.startBeats + c.durationBeats);
+  }
+  if (session_.loopMode())
+    endBeats = std::max(endBeats, session_.loopEnd());
+
+  std::string err;
+  if (!engine_.renderToWav(path.toStdString(), 0.0, endBeats, 2, err)) {
+    restore();
+    QMessageBox::warning(this, QStringLiteral("Export failed"),
+                         QString::fromStdString(err));
+    return;
+  }
+  restore();
+  statusBar()->showMessage(
+      QStringLiteral("Exported %1 (%2 beats)").arg(path).arg(endBeats, 0, 'f', 1));
 }
 
 QString MainWindow::stageAudioFile(const QString& src) const {

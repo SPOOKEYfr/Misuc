@@ -22,6 +22,7 @@ class TransportBar;
 class StatusPanel;
 class ProjectPage;
 class EditorPage;
+class AudioSettingsPage;
 
 // Application shell: menu bar (File / Edit), a project document shared between
 // the Project page and the file menu, transport on top, navigation rail, a
@@ -31,6 +32,13 @@ class MainWindow : public QMainWindow {
 public:
   explicit MainWindow(misuc::engine::AudioEngine& engine);
   ~MainWindow() override;
+
+  // Document access for embedders / tests. Mutations should be followed by
+  // sessionEdited() so the engine and undo stack pick up the change.
+  misuc::project::Session& session() noexcept { return session_; }
+  void sessionEdited() { onSessionEdited(); }
+  // Test hook: skip the save dialog and render straight to this path.
+  void setExportPathOverride(const QString& path) { exportPathOverride_ = path; }
 
 protected:
   void paintEvent(QPaintEvent* event) override;
@@ -49,6 +57,7 @@ private:
   bool saveProject();
   bool saveProjectAs();
   bool writeProject(const QString& path);
+  void exportAudio();
   void performUndo();
   void performRedo();
   void applyTempoToEngine();
@@ -75,8 +84,13 @@ private:
   StatusPanel* status_ = nullptr;
   ProjectPage* projectPage_ = nullptr;
   EditorPage* editorPage_ = nullptr;
+  AudioSettingsPage* audioSettings_ = nullptr;
   QTimer* timer_ = nullptr;
   QWidget* navRail_ = nullptr;
+
+  // Headless/testing hook: when set, exportAudio() skips the save dialog and
+  // renders directly to this path.
+  QString exportPathOverride_;
 
   // Beat position where recording started (kept in beats so it survives
   // engine-side resampling); used to place the finished clip on the timeline.

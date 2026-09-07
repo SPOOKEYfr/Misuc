@@ -225,23 +225,37 @@ void AudioSettingsPage::applyConfig() {
   cfg.bufferSize = bufferSize_->currentData().toUInt();
   cfg.inputChannels = 2;
   cfg.monitorGainDb = static_cast<float>(monitorSlider_->value());
+  if (startWith(cfg)) {
+    lastConfig_ = cfg;
+    lastConfigValid_ = true;
+  }
+}
+
+bool AudioSettingsPage::startWith(const misuc::engine::AudioConfig& cfg) {
   std::string err;
   engine_.closeAudio();
   if (!engine_.open(cfg, err)) {
     statusLabel_->setText(QStringLiteral("Open failed: %1").arg(
         QString::fromStdString(err)));
-    return;
+    return false;
   }
   if (!engine_.start()) {
     statusLabel_->setText(QStringLiteral("Start failed: %1").arg(
         QString::fromStdString(engine_.backendStatus().error)));
     engine_.closeAudio();
-    return;
+    return false;
   }
   statusLabel_->setText(QStringLiteral("Engine running."));
   toneBtn_->setEnabled(true);
   engine_.setGroove(grooveChk_->isChecked());
   engine_.setMonitorGainDb(cfg.monitorGainDb);
+  return true;
+}
+
+void AudioSettingsPage::restartStream() {
+  if (!lastConfigValid_)
+    return;
+  startWith(lastConfig_);
 }
 
 void AudioSettingsPage::openDevice() { applyConfig(); }

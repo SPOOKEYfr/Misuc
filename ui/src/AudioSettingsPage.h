@@ -2,6 +2,8 @@
 
 #include <QWidget>
 
+#include <misuc/engine/audio/AudioBackend.h>
+
 class QComboBox;
 class QLabel;
 class QPushButton;
@@ -27,6 +29,10 @@ class AudioSettingsPage : public QWidget {
 public:
   explicit AudioSettingsPage(misuc::engine::AudioEngine& engine, QWidget* parent = nullptr);
 
+  // Reopens the last successful device configuration. Used to restore the
+  // stream after an offline export that had to stop it.
+  void restartStream();
+
 private Q_SLOTS:
   void refreshDevices();
   void openDevice();
@@ -38,6 +44,7 @@ private Q_SLOTS:
 
 private:
   void applyConfig();
+  bool startWith(const misuc::engine::AudioConfig& cfg);
 
   misuc::engine::AudioEngine& engine_;
 
@@ -64,6 +71,9 @@ private:
   bool toneOn_ = false;
   bool grooveOn_ = false;
   bool monitorOn_ = false;
+
+  bool lastConfigValid_ = false;
+  misuc::engine::AudioConfig lastConfig_;
 };
 
 } // namespace misuc::ui

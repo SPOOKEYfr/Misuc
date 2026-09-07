@@ -184,6 +184,24 @@ be refined as development proceeds.
   exactly one commit fires, and dragging the grip past the start clamps the
   duration to 0.1.
 
+## Phase 8 — Multi-select, group edit, rubber band (done)
+
+- Left-drag on empty canvas draws a rubber-band marquee that live-selects every
+  note it crosses (a dashed green box is painted while dragging). Selection
+  never auditions and never commits.
+- Dragging any note that is part of a multi-selection moves the whole group by
+  the same snapped time/pitch delta (clamped at the horizon and pitch range),
+  auditioning the anchor note; releasing commits exactly one undo snapshot.
+  Del/Backspace deletes the entire selection in a single undo step. Velocity
+  and resize grips stay single-note (the note under the wheel/grip becomes the
+  sole selection).
+- All selected notes draw their border highlight; a plain click on an unselected
+  note behaves exactly as before (single-note drag).
+- No engine or session changes. UI harness (70 checks, +13): a marquee never
+  auditions; group drag shifts both notes (+1 beat/+1 pitch each) touching
+  neither the outsider note's time nor the group's velocities, with exactly one
+  commit; group Del removes both selected notes in one commit.
+
 ## Phase 8+ — Beyond
 
 - VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU

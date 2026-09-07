@@ -162,6 +162,10 @@ gestures emit `PianoRoll::audition(freq, velocity)` (add / drag / click),
   velocity. Dragging a note's right-edge grip (6 px, resize cursor on hover)
   resizes its duration snapped to the grid, clamped to 0.1 beats and the
   horizon, committing one undo snapshot per gesture.
+- **Editor** page (Phase 8): left-drag on empty canvas rubber-bands a selection
+  (dashed marquee, tolerant to drag direction, never auditions or commits);
+  dragging any note in a multi-selection moves the whole group by the same
+  snapped delta and Del/Backspace deletes it as one undo step.
 - **Audio Settings** page drives the live engine: it lists devices (output and
   input) from `PipeWireBackend::enumerateDevices`, offers sample-rate/buffer
   choices, shows latency, toggles the 440 Hz test tone and the groove beat,

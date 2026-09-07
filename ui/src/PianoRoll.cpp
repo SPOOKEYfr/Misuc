@@ -260,15 +260,46 @@ public:
                     100.0f / 127.0f);
   }
 
-  void deleteNote(int index) {
+  bool isSelected(int index) const {
+    return index == selected_ ||
+           std::find(selectSet_.begin(), selectSet_.end(), index) !=
+               selectSet_.end();
+  }
+
+  // Removes the given (descending) indices and invalidates all selection
+  // state; callers commit once afterward.
+  void deleteNotes(std::vector<int> indices) {
     Track* t = trackEdit();
-    if (!t || index < 0 || index >= static_cast<int>(t->notes.size()))
+    if (!t)
       return;
-    t->notes.erase(t->notes.begin() + index);
+    std::sort(indices.begin(), indices.end(), std::greater<int>());
+    for (const int i : indices) {
+      if (i < 0 || i >= static_cast<int>(t->notes.size()))
+        continue;
+      t->notes.erase(t->notes.begin() + i);
+    }
     selected_ = -1;
+    selectSet_.clear();
     update();
   }
 
+  void deleteNote(int index) {
+    deleteNotes({index});
+    update();
+  }
+
+  struct DragSnap {
+    int index;
+    double start;
+    int pitch;
+  };
+
+  bool selecting_ = false; // rubber-band selection in progress
+  QPointF marquee0_;
+  QPointF marquee1_;
+  bool multimove_ = false; // dragging a whole multi-selection
+  std::vector<DragSnap> groupSnap_;
+  std::vector<int> selectSet_;
   int selected_ = -1;
   bool dragging_ = false;
   bool dragged_ = false;
@@ -323,8 +354,8 @@ protected:
       const int a = 90 + static_cast<int>(n.velocity * 110 / 127);
       fill.setAlpha(std::min(230, a));
       p.setBrush(fill);
-      p.setPen(QPen(static_cast<int>(i) == selected_ ? theme::kOk
-                                                     : theme::kBorderBright,
+      p.setPen(QPen(isSelected(static_cast<int>(i)) ? theme::kOk
+                                                    : theme::kBorderBright,
                     1));
       p.drawRoundedRect(r.adjusted(0, 0, -1, -1), 2, 2);
       // Velocity bar: vertical bar growing from the note floor, height
@@ -346,6 +377,15 @@ protected:
         p.drawLine(QPointF(cx, 0), QPointF(cx, height()));
       }
     }
+
+    // Rubber-band selection marquee.
+    if (selecting_) {
+      QRectF box(marquee0_, marquee1_);
+      box = box.normalized();
+      p.setPen(QPen(QColor(0x9c, 0xa3, 0xaf), 1, Qt::DashLine));
+      p.setBrush(QColor(0x4a, 0xde, 0x80, 40));
+      p.drawRect(box);
+    }
   }
 
   void mousePressEvent(QMouseEvent* e) override {
@@ -355,6 +395,7 @@ protected:
       if (onResizeGrip(pos)) {
         const int hit = hitTest(pos);
         selected_ = hit;
+        selectSet_.clear();
         resizeIndex_ = hit;
         resizing_ = true;
         resized_ = false;
@@ -368,6 +409,7 @@ protected:
       if (hit >= 0) {
         const Track* t = track();
         const NoteEvent& n = t->notes[hit];
+        multimove_ = !selectSet_.empty() && isSelected(hit);
         selected_ = hit;
         dragIndex_ = hit;
         grabBeat_ = xToBeat(pos.x());
@@ -376,12 +418,29 @@ protected:
         dragOffsetPitch_ = grabPitch_ - static_cast<int>(n.pitch);
         dragging_ = true;
         dragged_ = false;
+        if (multimove_) {
+          groupSnap_.clear();
+          auto snapshot = [&](int i) {
+            groupSnap_.push_back(
+                {i, t->notes[i].startBeats, static_cast<int>(t->notes[i].pitch)});
+          };
+          if (selected_ >= 0)
+            snapshot(selected_);
+          for (const int i : selectSet_)
+            if (i != selected_)
+              snapshot(i);
+        } else {
+          selectSet_.clear();
+        }
         owner_->audition(misuc::dsp::midiNoteToFreq(static_cast<double>(n.pitch)),
                          n.velocity / 127.0f);
       } else {
         selected_ = -1;
+        selectSet_.clear();
         dragging_ = false;
         dragged_ = false;
+        selecting_ = true;
+        marquee0_ = marquee1_ = pos;
       }
       update();
     } else if (e->button() == Qt::RightButton) {
@@ -390,6 +449,7 @@ protected:
         deleteNote(hit);
       else {
         selected_ = -1;
+        selectSet_.clear();
       }
       update();
     }
@@ -413,6 +473,26 @@ protected:
       e->accept();
       return;
     }
+    if (selecting_) {
+      const Track* t = track();
+      marquee1_ = e->position();
+      QRectF box(marquee0_, marquee1_);
+      box = box.normalized();
+      selected_ = -1;
+      selectSet_.clear();
+      if (t) {
+        for (size_t i = 0; i < t->notes.size(); ++i) {
+          if (box.intersects(
+                  noteRect(t->notes[i]).adjusted(0, 2, 0, -2))) {
+            selected_ = static_cast<int>(i);
+            selectSet_.push_back(static_cast<int>(i));
+          }
+        }
+      }
+      update();
+      e->accept();
+      return;
+    }
     if (dragging_) {
       Track* t = trackEdit();
       if (dragIndex_ < 0 || dragIndex_ >= static_cast<int>(t->notes.size()))
@@ -423,13 +503,43 @@ protected:
       const double newStart =
           std::clamp(snapped(beat - dragOffsetBeats_), 0.0, PianoRoll::kHorizonBeats);
       const int newPitch = std::clamp(pitch - dragOffsetPitch_, kLowPitch, kHighPitch);
-      if (std::fabs(newStart - n.startBeats) > 1e-6 || newPitch != static_cast<int>(n.pitch)) {
-        n.startBeats = newStart;
-        n.pitch = static_cast<uint8_t>(newPitch);
-        dragged_ = true;
-        owner_->audition(
-            misuc::dsp::midiNoteToFreq(static_cast<double>(n.pitch)),
-            n.velocity / 127.0f);
+      if (multimove_) {
+        const DragSnap* anchor = nullptr;
+        for (const DragSnap& g : groupSnap_)
+          if (g.index == dragIndex_)
+            anchor = &g;
+        if (!anchor)
+          return;
+        const double dStart = newStart - anchor->start;
+        const int dPitch = newPitch - anchor->pitch;
+        bool changed = false;
+        for (const DragSnap& g : groupSnap_) {
+          NoteEvent& gn = t->notes[g.index];
+          const double s = std::clamp(g.start + dStart, 0.0,
+                                      PianoRoll::kHorizonBeats);
+          const int p = std::clamp(g.pitch + dPitch, kLowPitch, kHighPitch);
+          if (std::fabs(s - gn.startBeats) > 1e-6 ||
+              p != static_cast<int>(gn.pitch)) {
+            gn.startBeats = s;
+            gn.pitch = static_cast<uint8_t>(p);
+            changed = true;
+          }
+        }
+        if (changed) {
+          dragged_ = true;
+          owner_->audition(
+              misuc::dsp::midiNoteToFreq(static_cast<double>(newPitch)),
+              n.velocity / 127.0f);
+        }
+      } else {
+        if (std::fabs(newStart - n.startBeats) > 1e-6 || newPitch != static_cast<int>(n.pitch)) {
+          n.startBeats = newStart;
+          n.pitch = static_cast<uint8_t>(newPitch);
+          dragged_ = true;
+          owner_->audition(
+              misuc::dsp::midiNoteToFreq(static_cast<double>(n.pitch)),
+              n.velocity / 127.0f);
+        }
       }
       update();
       return;
@@ -442,6 +552,11 @@ protected:
 
   void mouseReleaseEvent(QMouseEvent* e) override {
     Q_UNUSED(e);
+    if (selecting_) {
+      selecting_ = false;
+      update();
+      return;
+    }
     if (resizing_) {
       resizing_ = false;
       if (resized_)
@@ -451,6 +566,8 @@ protected:
     }
     if (dragging_) {
       dragging_ = false;
+      multimove_ = false;
+      groupSnap_.clear();
       if (dragged_)
         owner_->commit();
       dragged_ = false;
@@ -468,12 +585,19 @@ protected:
   }
 
   void keyPressEvent(QKeyEvent* e) override {
-    if ((e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) &&
-        selected_ >= 0) {
-      deleteNote(selected_);
-      owner_->commit();
-      e->accept();
-      return;
+    if (e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) {
+      std::vector<int> doomed;
+      if (selected_ >= 0)
+        doomed.push_back(selected_);
+      for (const int i : selectSet_)
+        if (i != selected_)
+          doomed.push_back(i);
+      if (!doomed.empty()) {
+        deleteNotes(doomed);
+        owner_->commit();
+        e->accept();
+        return;
+      }
     }
     QWidget::keyPressEvent(e);
   }
@@ -499,6 +623,7 @@ protected:
             n.velocity = static_cast<uint8_t>(std::clamp(
                 static_cast<int>(n.velocity) + step, 1, 127));
             selected_ = hit;
+            selectSet_.clear();
             owner_->audition(
                 misuc::dsp::midiNoteToFreq(static_cast<double>(n.pitch)),
                 n.velocity / 127.0f);

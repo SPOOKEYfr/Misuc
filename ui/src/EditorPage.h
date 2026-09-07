@@ -27,6 +27,9 @@ public:
   // Repopulate list + repaint piano roll (called after open/undo/redo/new).
   void refresh();
 
+  // Select the track by id (from the mixer's strips) and mirror its state.
+  void selectTrack(const QString& id, bool notify = true);
+
   // The active piano roll, so the main window can wire audition + playhead.
   PianoRoll* piano() const { return piano_; }
 
@@ -37,6 +40,7 @@ public:
 
 signals:
   void edited();
+  void trackSelected(const QString& id);
 
 private:
   void rebuildTrackList();

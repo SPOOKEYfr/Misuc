@@ -255,12 +255,29 @@ void EditorPage::importAudio() {
   }
 }
 
+void EditorPage::selectTrack(const QString& id, bool notify) {
+  for (int r = 0; r < trackList_->count(); ++r) {
+    if (trackList_->item(r)->data(Qt::UserRole).toString() == id) {
+      const bool block = trackList_->signalsBlocked();
+      trackList_->blockSignals(!notify);
+      trackList_->setCurrentRow(r);
+      trackList_->blockSignals(block);
+      selectedId_ = id;
+      piano_->setTrack(id);
+      if (notify)
+        emit trackSelected(id);
+      return;
+    }
+  }
+}
+
 void EditorPage::onSelectionChanged(int row) {
   if (row < 0 || row >= trackList_->count())
     return;
   const QString id = trackList_->item(row)->data(Qt::UserRole).toString();
   selectedId_ = id;
   piano_->setTrack(id);
+  emit trackSelected(id);
 }
 
 } // namespace misuc::ui

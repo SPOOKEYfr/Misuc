@@ -35,6 +35,8 @@
 #include "Theme.h"
 #include "TransportBar.h"
 #include "PianoRoll.h"
+#include "mixer/MixerPage.h"
+#include "theme/ThemePage.h"
 
 namespace misuc::ui {
 
@@ -99,7 +101,9 @@ MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
 
   addNav(QStringLiteral("Project"), 0);
   addNav(QStringLiteral("Editor"), 1);
-  addNav(QStringLiteral("Audio"), 2);
+  addNav(QStringLiteral("Mixer"), 2);
+  addNav(QStringLiteral("Audio"), 3);
+  addNav(QStringLiteral("Appearance"), 4);
   navLay->addStretch();
 
   midLay->addWidget(navRail_);
@@ -173,10 +177,14 @@ void MainWindow::buildMenus() {
 void MainWindow::buildPages() {
   projectPage_ = new ProjectPage(session_, this);
   editorPage_ = new EditorPage(session_, this);
+  mixerPage_ = new MixerPage(session_, engine_, this);
   audioSettings_ = new AudioSettingsPage(engine_, this);
+  themePage_ = new ThemePage(this);
   pages_->addWidget(projectPage_);
   pages_->addWidget(editorPage_);
+  pages_->addWidget(mixerPage_);
   pages_->addWidget(audioSettings_);
+  pages_->addWidget(themePage_);
 
   editorPage_->importAudioSink = [this](const QString& src) {
     return stageAudioFile(src);
@@ -186,10 +194,21 @@ void MainWindow::buildPages() {
           &MainWindow::onSessionEdited);
   connect(editorPage_, &EditorPage::edited, this,
           &MainWindow::onSessionEdited);
+  connect(mixerPage_, &MixerPage::edited, this,
+          &MainWindow::onSessionEdited);
+
+  // Keep the track selection mirrored between the editor list and the mixer
+  // strips; each side only echoes back a state change, never re-broadcasts it.
+  connect(editorPage_, &EditorPage::trackSelected, this,
+          [this](const QString& id) { mixerPage_->selectTrack(id); });
+  connect(mixerPage_, &MixerPage::trackSelected, this,
+          [this](const QString& id) { editorPage_->selectTrack(id, false); });
 
   // Note audition: preview the pitch immediately, even while stopped.
   connect(editorPage_->piano(), &PianoRoll::audition, this,
           [this](double freq, float vel) { engine_.previewNote(freq, vel); });
+
+  mixerPage_->syncToEngine();
 }
 
 void MainWindow::onSessionEdited() {
@@ -199,6 +218,8 @@ void MainWindow::onSessionEdited() {
   applyLoopToEngine(session_);
   rebuildMidiScore();
   rebuildClipScore();
+  mixerPage_->syncFromSession();
+  mixerPage_->syncToEngine();
   undoCmd_->setEnabled(undo_.canUndo());
   redoCmd_->setEnabled(undo_.canRedo());
   updateWindowTitle();
@@ -368,6 +389,7 @@ void MainWindow::poll() {
   transport_->refresh();
   status_->refresh();
   feedPlayhead();
+  mixerPage_->pollMeters();
 }
 
 void MainWindow::feedPlayhead() {
@@ -405,6 +427,8 @@ void MainWindow::newProject() {
   undo_.push(session_);
   projectPage_->refresh();
   editorPage_->refresh();
+  mixerPage_->refresh();
+  mixerPage_->syncToEngine();
   applyTempoToEngine();
   rebuildMidiScore();
   rebuildClipScore();
@@ -443,6 +467,8 @@ void MainWindow::openProject(const QString& path) {
   undo_.push(session_);
   projectPage_->refresh();
   editorPage_->refresh();
+  mixerPage_->refresh();
+  mixerPage_->syncToEngine();
   applyTempoToEngine();
   applyLoopToEngine(session_);
   rebuildMidiScore();
@@ -486,6 +512,8 @@ void MainWindow::performUndo() {
   session_ = undo_.state();
   projectPage_->refresh();
   editorPage_->refresh();
+  mixerPage_->refresh();
+  mixerPage_->syncToEngine();
   applyTempoToEngine();
   applyLoopToEngine(session_);
   rebuildMidiScore();
@@ -502,6 +530,8 @@ void MainWindow::performRedo() {
   session_ = undo_.state();
   projectPage_->refresh();
   editorPage_->refresh();
+  mixerPage_->refresh();
+  mixerPage_->syncToEngine();
   applyTempoToEngine();
   applyLoopToEngine(session_);
   rebuildMidiScore();

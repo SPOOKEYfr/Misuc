@@ -6,6 +6,7 @@ add_executable(misuc_app
   src/main.cpp
   src/Theme.cpp
   src/theme/ThemeEngine.cpp
+  src/theme/ThemePage.cpp
   src/MainWindow.cpp
   src/TransportBar.cpp
   src/MeterWidget.cpp
@@ -13,7 +14,12 @@ add_executable(misuc_app
   src/ProjectPage.cpp
   src/StatusPanel.cpp
   src/PianoRoll.cpp
-  src/EditorPage.cpp)
+  src/EditorPage.cpp
+  src/mixer/Knob.cpp
+  src/mixer/Fader.cpp
+  src/mixer/VerticalMeter.cpp
+  src/mixer/ChannelStrip.cpp
+  src/mixer/MixerPage.cpp)
 
 target_include_directories(misuc_app PRIVATE src)
 

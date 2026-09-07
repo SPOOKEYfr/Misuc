@@ -23,6 +23,8 @@ class StatusPanel;
 class ProjectPage;
 class EditorPage;
 class AudioSettingsPage;
+class MixerPage;
+class ThemePage;
 
 // Application shell: menu bar (File / Edit), a project document shared between
 // the Project page and the file menu, transport on top, navigation rail, a
@@ -85,6 +87,8 @@ private:
   ProjectPage* projectPage_ = nullptr;
   EditorPage* editorPage_ = nullptr;
   AudioSettingsPage* audioSettings_ = nullptr;
+  MixerPage* mixerPage_ = nullptr;
+  ThemePage* themePage_ = nullptr;
   QTimer* timer_ = nullptr;
   QWidget* navRail_ = nullptr;
 

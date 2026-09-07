@@ -178,7 +178,7 @@ void PianoRuler::paintEvent(QPaintEvent*) {
       const double hx = hi * px - hbar_;
       QRectF region(lx, 2, hx - lx, height() - 4);
       if (region.intersects(QRectF(-1, 2, width() + 2, height() - 4))) {
-        p.fillRect(region, QColor(0x4a, 0xde, 0x80, 40));
+        p.fillRect(region, theme::kLoopRegion);
         p.setPen(QPen(theme::kOk, 1.5));
         p.drawLine(QPointF(lx, 2), QPointF(lx, height() - 2));
         p.drawLine(QPointF(hx, 2), QPointF(hx, height() - 2));
@@ -230,7 +230,7 @@ void PianoKeys::paintEvent(QPaintEvent*) {
       p.setPen(QPen(theme::kBorder, 1));
       p.drawRect(row.adjusted(0, 0, -1, -1));
     } else {
-      p.fillRect(row, QColor(0x232c3b));
+      p.fillRect(row, theme::kGridRow);
       p.setPen(QPen(theme::kBorder, 1));
       p.drawRect(row.adjusted(0, 0, -1, -1));
     }
@@ -642,7 +642,7 @@ protected:
       const QRectF r = clipRect(c);
       const bool sel = isClipSelected(static_cast<int>(i));
       p.setPen(QPen(sel ? theme::kOk : theme::kBorderBright, 1));
-      p.setBrush(QColor(0x1d, 0x33, 0x47));
+      p.setBrush(theme::kClipBody);
       p.drawRoundedRect(r.adjusted(0, 0, -1, -1), 3, 3);
       const WaveCache& w = waveFor(c);
       if (w.ok && w.peaks.size() > 1) {
@@ -655,7 +655,7 @@ protected:
           const float amp = std::clamp(w.peaks[bin], 0.f, 1.f);
           const double vh = std::max(1.0, amp * wH);
           p.fillRect(QRectF(bx, wBot - vh, std::max(1.0, binW), vh),
-                     QColor(0x6f, 0xb5, 0xde, amp > 0.f ? 190 : 60));
+                     theme::withAlpha(theme::kClipWave, amp > 0.f ? 190 : 60));
         }
       }
       if (sel) {
@@ -712,8 +712,8 @@ protected:
     if (selecting_) {
       QRectF box(marquee0_, marquee1_);
       box = box.normalized();
-      p.setPen(QPen(QColor(0x9c, 0xa3, 0xaf), 1, Qt::DashLine));
-      p.setBrush(QColor(0x4a, 0xde, 0x80, 40));
+      p.setPen(QPen(theme::kMarquee, 1, Qt::DashLine));
+      p.setBrush(theme::withAlpha(theme::kLoopRegion, 40));
       p.drawRect(box);
     }
   }

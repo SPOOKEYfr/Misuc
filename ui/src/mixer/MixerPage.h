@@ -60,6 +60,7 @@ private:
   void onSoloToggled(const QString& id, bool on);
   void onMasterGainChanged(float db);
   int trackIndex(const QString& id) const;
+  QColor stripColor(size_t index) const;
 
   misuc::project::Session* session_;
   misuc::engine::AudioEngine& engine_;

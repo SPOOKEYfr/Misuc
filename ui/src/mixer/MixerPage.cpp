@@ -23,7 +23,9 @@ using misuc::project::Track;
 namespace misuc::ui {
 
 namespace {
-// Stable per-track accent colors (rotated by track index).
+// Per-track accent colors (rotated by track index). The first channel follows
+// the active theme accent instead of a fixed literal so the mixer never
+// hardcodes brand colors; the rest stay on the stable rotation.
 const QColor kStripColors[] = {
     QColor(0xff, 0x6b, 0x4a), QColor(0x22, 0xd3, 0xee),
     QColor(0x4a, 0xde, 0x80), QColor(0xa9, 0x70, 0xff),
@@ -64,6 +66,21 @@ MixerPage::MixerPage(Session& session, misuc::engine::AudioEngine& engine,
   root->addWidget(scroll_, 1);
 
   rebuildStrips();
+
+  // Apply the persisted master gain to the live fader + engine (no signal: the
+  // fader only reports user interaction), so a loaded project's master bus is
+  // heard exactly as saved.
+  masterFader_->setValueDb(session.masterGainDb());
+  masterReadout_->setText(QString::number(session.masterGainDb(), 'f', 1));
+  engine_.setMasterGainDb(session.masterGainDb());
+}
+
+QColor MixerPage::stripColor(size_t index) const {
+  constexpr size_t kCount =
+      sizeof(kStripColors) / sizeof(kStripColors[0]);
+  if (index == 0)
+    return theme::kAccent;
+  return kStripColors[index % kCount];
 }
 
 void MixerPage::refresh() { rebuildStrips(); }
@@ -94,7 +111,7 @@ void MixerPage::rebuildStrips() {
   for (const Track& t : session_->tracks()) {
     auto* strip = new ChannelStrip(QString::fromStdString(t.id), stripsHost_);
     strip->setName(QString::fromStdString(t.name));
-    strip->setColor(kStripColors[i % (sizeof(kStripColors) / sizeof(kStripColors[0]))]);
+    strip->setColor(stripColor(i));
     strip->setPan(static_cast<int>(std::lround(t.pan * 100.f)));
     strip->setGainDb(t.gainDb);
     strip->setMute(t.muted);
@@ -171,17 +188,22 @@ void MixerPage::syncFromSession() {
   size_t i = 0;
   for (const Track& t : session_->tracks()) {
     strips_[i]->setName(QString::fromStdString(t.name));
-    strips_[i]->setColor(kStripColors[i % (sizeof(kStripColors) / sizeof(kStripColors[0]))]);
+    strips_[i]->setColor(stripColor(i));
     strips_[i]->setPan(static_cast<int>(std::lround(t.pan * 100.f)));
     strips_[i]->setGainDb(t.gainDb);
     strips_[i]->setMute(t.muted);
     strips_[i]->setSolo(t.solo);
     ++i;
   }
+  if (masterFader_) {
+    masterFader_->setValueDb(session_->masterGainDb());
+    masterReadout_->setText(QString::number(session_->masterGainDb(), 'f', 1));
+  }
   syncing_ = false;
 }
 
 void MixerPage::syncToEngine() {
+  engine_.setMasterGainDb(session_->masterGainDb());
   std::vector<misuc::engine::MixerTrackParam> params;
   for (const Track& t : session_->tracks()) {
     params.push_back(misuc::engine::MixerTrackParam{
@@ -275,6 +297,8 @@ void MixerPage::onSoloToggled(const QString& id, bool on) {
 void MixerPage::onMasterGainChanged(float db) {
   masterReadout_->setText(QString::number(db, 'f', 1));
   engine_.setMasterGainDb(db);
+  session_->setMasterGainDb(db);
+  emit edited();
   syncToEngine(); // keep published mixer params in sync with master
 }
 

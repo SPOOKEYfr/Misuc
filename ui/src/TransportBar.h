@@ -36,7 +36,7 @@ private:
 
   misuc::engine::AudioEngine& engine_;
   bool playing_ = false;
-  bool countIn_ = true;
+  bool countIn_ = false;
   bool loopOn_ = false;
   bool recording_ = false;
   uint64_t playhead_ = 0;

@@ -38,6 +38,9 @@ public:
   // final path to reference; an empty result aborts the import.
   std::function<QString(const QString&)> importAudioSink;
 
+  // Public entry point for the Add menu (Add → New Track).
+  void addNewTrack() { addTrack(); }
+
 signals:
   void edited();
   void trackSelected(const QString& id);

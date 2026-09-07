@@ -190,7 +190,7 @@ void PianoRuler::paintEvent(QPaintEvent*) {
   if (playheadVisible_ && playheadBeats_ >= 0.0) {
     const double cx = playheadBeats_ * px - hbar_;
     if (cx >= -1.0 && cx <= width() + 1.0) {
-      p.setPen(QPen(theme::kOk, 2));
+      p.setPen(QPen(theme::kPlayhead, 2));
       p.drawLine(QPointF(cx, 2), QPointF(cx, height() - 1));
     }
   }
@@ -703,7 +703,7 @@ protected:
     if (playheadVisible_ && playheadBeats_ >= 0.0) {
       const double cx = beatToX(playheadBeats_);
       if (cx >= -1.0 && cx <= width() + 1.0) {
-        p.setPen(QPen(theme::kOk, 2));
+        p.setPen(QPen(theme::kPlayhead, 2));
         p.drawLine(QPointF(cx, 0), QPointF(cx, height()));
       }
     }

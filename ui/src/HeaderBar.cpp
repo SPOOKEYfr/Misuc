@@ -10,6 +10,7 @@
 #include <QLabel>
 #include <QPainter>
 #include <QTextStream>
+#include <QToolButton>
 #include <QtGlobal>
 #include <unistd.h>
 
@@ -20,6 +21,7 @@
 #include "Theme.h"
 #include "TransportBar.h"
 #include "theme/ThemeEngine.h"
+#include "tooltip/MisucTooltip.h"
 
 #include <algorithm>
 
@@ -187,11 +189,15 @@ HeaderBar::HeaderBar(misuc::engine::AudioEngine& engine, QWidget* parent)
   addWidget(centre);
   centre->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
+  addWidget(buildWorkspaceStrip());
   addWidget(buildRightCluster());
 
   cpuTimer_.start();
   connect(&ThemeEngine::instance(), &ThemeEngine::themeChanged, this,
-          [this] { refreshLogo(); });
+          [this] {
+            refreshLogo();
+            syncStripIcons();
+          });
   refreshLogo();
 }
 
@@ -235,6 +241,74 @@ QWidget* HeaderBar::buildCenterTransport() {
   transport_->setMinimumHeight(kHeaderHeight - 8);
   transport_->setMaximumWidth(720);
   return transport_;
+}
+
+QWidget* HeaderBar::buildWorkspaceStrip() {
+  auto* host = new QWidget(this);
+  host->setObjectName(QStringLiteral("workspaceStrip"));
+  auto* lay = new QHBoxLayout(host);
+  lay->setContentsMargins(8, 4, 8, 4);
+  lay->setSpacing(4);
+
+  const struct {
+    const char* id;
+    icons::IconId icon;
+  } kStrip[] = {
+      {"playlist", icons::IconId::Playlist},
+      {"pianoroll", icons::IconId::PianoRoll},
+      {"channelrack", icons::IconId::ChannelRack},
+      {"mixer", icons::IconId::Mixer},
+      {"browser", icons::IconId::Browser},
+      {"inspector", icons::IconId::Inspector},
+  };
+  for (const auto& [id, icon] : kStrip) {
+    QToolButton* b = stripButton(QString::fromLatin1(id), icon);
+    wsButtons_.insert(QString::fromLatin1(id), b);
+    wsIconIds_.insert(QString::fromLatin1(id), icon);
+    lay->addWidget(b);
+  }
+  return host;
+}
+
+QToolButton* HeaderBar::stripButton(const QString& id, icons::IconId icon) {
+  auto* b = new QToolButton(this);
+  b->setObjectName(QStringLiteral("ws_") + id);
+  b->setCheckable(true);
+  b->setAutoRaise(true);
+  b->setIconSize(QSize(18, 18));
+  b->setFixedSize(30, 30);
+  b->setCursor(Qt::PointingHandCursor);
+  b->setFocusPolicy(Qt::NoFocus);
+  connect(b, &QToolButton::clicked, this,
+          [this, id] { emit workspaceIconClicked(id); });
+  b->setIcon(icons::make(icon, theme::kTextSecondary));
+  MisucTooltip::attach(b, QStringLiteral("ws.") + id);
+  return b;
+}
+
+void HeaderBar::syncStripIcons() {
+  for (auto it = wsButtons_.cbegin(); it != wsButtons_.cend(); ++it) {
+    const bool active = it.value()->isChecked();
+    const icons::IconId id = wsIconIds_.value(it.key());
+    it.value()->setIcon(icons::make(
+        id, active ? theme::kAccentActive : theme::kTextSecondary));
+  }
+}
+
+void HeaderBar::setWorkspaceActive(const QString& workspaceId, bool active) {
+  QToolButton* b = wsButtons_.value(workspaceId);
+  if (!b)
+    return;
+  b->setChecked(active);
+  syncStripIcons();
+}
+
+void HeaderBar::setSnapActive(bool on) {
+  transport_->setSnapOn(on);
+}
+
+void HeaderBar::setSongMode(bool song) {
+  transport_->setSongMode(song);
 }
 
 QWidget* HeaderBar::buildRightCluster() {

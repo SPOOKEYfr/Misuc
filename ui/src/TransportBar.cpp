@@ -55,6 +55,16 @@ void TransportBar::setLoopOn(bool on) {
   update();
 }
 
+void TransportBar::setSnapOn(bool on) {
+  snap_ = on;
+  update();
+}
+
+void TransportBar::setSongMode(bool song) {
+  songMode_ = song;
+  update();
+}
+
 void TransportBar::refresh() {
   playing_ = engine_.isTransportPlaying();
   recording_ = engine_.isRecording();
@@ -91,6 +101,8 @@ void TransportBar::paintEvent(QPaintEvent*) {
   clickBtn_ = buttonRect(top, 2);
   loopBtn_ = buttonRect(top, 3);
   recordBtn_ = buttonRect(top, 4);
+  snapBtn_ = buttonRect(top, 5);
+  modeBtn_ = buttonRect(top, 6);
 
   // Play button.
   {
@@ -182,36 +194,86 @@ void TransportBar::paintEvent(QPaintEvent*) {
     p.restore();
   }
 
-  // Position readout.
-  displayRect_ = QRectF(clickBtn_.right() + 28, y, 210, 40);
+  // Snap toggle (magnet glyph).
+  {
+    QPainterPath path;
+    path.addEllipse(snapBtn_);
+    p.save();
+    p.setBrush(snap_ ? theme::kAccentSoft : theme::kPanelRaised);
+    p.setPen(QPen(snap_ ? theme::kAccent : theme::kBorderBright, 1.5));
+    p.drawPath(path);
+    const double cx = snapBtn_.center().x(), cy = snapBtn_.center().y();
+    p.setPen(Qt::NoPen);
+    p.setBrush(snap_ ? theme::kAccent : theme::kTextDim);
+    p.drawArc(QRectF(cx - 5.5, cy - 1, 11, 8), 0, 180 * 16);
+    p.drawRect(QRectF(cx - 1.5 + 0.5, cy - 1.5, 1.5, 4));
+    p.drawRect(QRectF(cx + 1.5, cy - 1.5, 1.5, 4));
+    p.restore();
+  }
+
+  // Song/pattern playback mode toggle (arrangement blocks vs single strip).
+  {
+    QPainterPath path;
+    path.addEllipse(modeBtn_);
+    p.save();
+    p.setBrush(theme::kPanelRaised);
+    p.setPen(QPen(theme::kBorderBright, 1.5));
+    p.drawPath(path);
+    const double cx = modeBtn_.center().x(), cy = modeBtn_.center().y();
+    p.setPen(Qt::NoPen);
+    p.setBrush(songMode_ ? theme::kAccent : theme::kTextDim);
+    const double unit = 3.0;
+    if (songMode_) {
+      for (int i = 0; i < 3; ++i)
+        p.drawRect(QRectF(cx - 6 + i * 5, cy - 2, 4, 4));
+      p.drawRect(QRectF(cx - 6, cy + 3, 4, 4));
+      p.drawRect(QRectF(cx + 4, cy + 3, 4, 4));
+    } else {
+      p.drawRect(QRectF(cx - 5, cy - unit, 10, unit));
+      p.drawRect(QRectF(cx - 5, cy, 10, unit));
+      p.drawRect(QRectF(cx - 5, cy + unit, 10, unit));
+    }
+    p.restore();
+  }
+
+  // Position readout (musical position + elapsed clock) in a two-line field.
+  displayRect_ = QRectF(modeBtn_.right() + 24, y, 200, 40);
   p.setBrush(theme::kPanelSunken);
   p.setPen(QPen(theme::kBorder, 1));
   p.drawRoundedRect(displayRect_, 6, 6);
-  p.setPen(theme::kText);
-  p.setFont(theme::monoFont(15));
   const QString pos = positionAtFrame(playhead_, tempo_, 48000, tsNum_, tsDen_);
-  p.drawText(displayRect_, Qt::AlignCenter, pos);
+  p.setPen(theme::kText);
+  p.setFont(theme::monoFont(14));
+  p.drawText(QRectF(displayRect_.left() + 6, displayRect_.top() + 1,
+                    displayRect_.width() - 12, 22),
+             Qt::AlignVCenter | Qt::AlignLeft, pos);
+  // Elapsed clock: HH:MM:SS driven by real engine frames.
+  {
+    const uint64_t frames = playhead_;
+    const uint32_t sr = engine_.sampleRate() > 0 ? engine_.sampleRate() : 48000;
+    const qint64 s = static_cast<qint64>(frames / (sr > 0 ? sr : 1));
+    const QString clk = QStringLiteral("%1:%2:%3")
+                            .arg(s / 3600, 2, 10, QLatin1Char('0'))
+                            .arg((s % 3600) / 60, 2, 10, QLatin1Char('0'))
+                            .arg(s % 60, 2, 10, QLatin1Char('0'));
+    p.setPen(theme::kAccent);
+    p.setFont(theme::monoFont(10));
+    p.drawText(QRectF(displayRect_.left() + 6, displayRect_.top() + 19,
+                      displayRect_.width() - 12, 16),
+               Qt::AlignVCenter | Qt::AlignLeft,
+               QStringLiteral("CLK %1").arg(clk));
+  }
 
-  // Tempo readout + label.
+  // Tempo + time-signature readout (live 3-decimal BPM, engine-backed).
   const double tx = displayRect_.right() + 24;
   const double textW = width() - tx - 10;
-  p.setPen(theme::kTextDim);
+  p.setPen(theme::kAccent);
   p.setFont(theme::uiFont(8, QFont::DemiBold));
-  p.drawText(QRectF(tx, y + 4, textW, 14), Qt::AlignLeft, QStringLiteral("TEMPO"));
+  p.drawText(QRectF(tx, y + 2, textW, 14), Qt::AlignLeft, QStringLiteral("TEMPO · TIME"));
   p.setPen(theme::kText);
-  p.setFont(theme::monoFont(14));
-  p.drawText(QRectF(tx, y + 18, textW, 22), Qt::AlignLeft,
-             QStringLiteral("%1 BPM").arg(tempo_, 0, 'f', 1));
-
-  // Time signature.
-  const double sx = tx + 92;
-  p.setPen(theme::kTextDim);
-  p.setFont(theme::uiFont(8, QFont::DemiBold));
-  p.drawText(QRectF(sx, y + 4, textW, 14), Qt::AlignLeft, QStringLiteral("TIME"));
-  p.setPen(theme::kText);
-  p.setFont(theme::monoFont(14));
-  p.drawText(QRectF(sx, y + 18, textW, 22), Qt::AlignLeft,
-             QStringLiteral("%1/%2").arg(tsNum_).arg(tsDen_));
+  p.setFont(theme::monoFont(13));
+  p.drawText(QRectF(tx, y + 15, textW, 26), Qt::AlignLeft,
+             QStringLiteral("%1  %2/%3").arg(tempo_, 0, 'f', 3).arg(tsNum_).arg(tsDen_));
 }
 
 void TransportBar::mousePressEvent(QMouseEvent* event) {
@@ -235,6 +297,14 @@ void TransportBar::mousePressEvent(QMouseEvent* event) {
   } else if (recordBtn_.contains(pos)) {
     recording_ = !recording_;
     emit recordToggled(recording_);
+    update();
+  } else if (snapBtn_.contains(pos)) {
+    snap_ = !snap_;
+    emit snapToggled(snap_);
+    update();
+  } else if (modeBtn_.contains(pos)) {
+    songMode_ = !songMode_;
+    emit modeToggled(songMode_);
     update();
   }
   QWidget::mousePressEvent(event);

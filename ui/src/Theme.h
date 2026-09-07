@@ -24,9 +24,9 @@ inline QColor kText("#e8edf4");
 inline QColor kTextDim("#8a94a6");
 inline QColor kTextFaint("#5b6472");
 
-inline QColor kAccent("#ff6b4a");       // warm coral
-inline QColor kAccentPressed("#e85533");
-inline QColor kAccentSoft("#3a2420");
+inline QColor kAccent("#8f7bfa");       // restrained violet
+inline QColor kAccentPressed("#6f5cd6");
+inline QColor kAccentSoft("#2a2350");
 inline QColor kOk("#4ade80");
 inline QColor kDanger("#ff5c5c");
 inline QColor kMeterDim("#1f2836");
@@ -35,8 +35,8 @@ inline QColor kMeterTrack("#263041");
 // Glass material: a translucent raised surface with a bright top edge, used by
 // the mixer panels. Falls back to opaque kPanelRaised when glass is disabled
 // (software rendering / weak GPU) so the UI stays fast and legible.
-inline QColor kGlass(0x22, 0x2e, 0x40, 200);
-inline QColor kGlassBorder(0x88, 0x9a, 0xb5, 70);
+inline QColor kGlass(0x22, 0x2e, 0x40, 186);
+inline QColor kGlassBorder(0x88, 0x9a, 0xb5, 78);
 inline QColor kGlassHighlight(0xff, 0xff, 0xff, 26);
 
 // --------------------------------------------------------------------------
@@ -60,25 +60,33 @@ inline QColor kTextSecondary("#a9b4c5");
 inline QColor kTextMuted("#5b6472");         // == kTextFaint
 inline QColor kTextDisabled("#3d4450");
 
-// Interactive accents.
-inline QColor kAccentHover("#ff815f");
-inline QColor kSelection("#3a2420");         // == kAccentSoft
+// Interactive accents (violet design language, §37).
+inline QColor kAccentHover("#aa96ff");
+inline QColor kAccentActive("#bdabff");
+inline QColor kAccentFaint(0x8f, 0x7b, 0xfa, 38);
+inline QColor kSelection("#2a2350");          // == kAccentSoft
+inline QColor kMatteSurface("#111722");       // matte charcoal for racks/playlist
 
 // Chrome surfaces (header / dock titles / transport / hint bar).
 inline QColor kPanelHeader("#161c27");
 inline QColor kToolbar("#0c1017");
 inline QColor kTransport("#0d121b");
 inline QColor kHintBar("#0d121b");
-inline QColor kTooltipBg("#1c2531");
+inline QColor kTooltipBg("#1f2430");
 inline QColor kButton("#1d2531");
 inline QColor kButtonHover("#283245");
 inline QColor kButtonPressed("#141a24");
+inline QColor kBorderStrong("#3a4660");
 
 // Editor + meters (fixed stock values so pixel tests and readability hold).
 inline QColor kGridRow("#232c3b");
-inline QColor kPlayhead("#4ade80");
-inline QColor kLoopRegion("#4ade80");
+inline QColor kGridStrong("#3a4660");
+inline QColor kPlayhead(0xb3, 0x9b, 0xff, 255);   // thin luminous violet caret
+inline QColor kLoopRegion(0x8f, 0x7b, 0xfa, 90);  // translucent violet loop
 inline QColor kClipBody("#1d3347");
+inline QColor kClipMidi("#223059");
+inline QColor kClipPattern("#2a2350");
+inline QColor kClipAutomation("#1d3d34");
 inline QColor kClipWave("#6fb5de");
 inline QColor kMarquee("#9ca3af");
 inline QColor kMeterNormal("#4ade80");

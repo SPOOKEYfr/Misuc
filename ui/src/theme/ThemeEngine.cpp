@@ -36,10 +36,11 @@ struct PresetRecord {
 };
 
 const PresetRecord kPresets[] = {
-    // Dark, warm studio baseline. This is the long-standing Misuc look.
+    // Dark, warm-violet studio baseline. This is the long-standing Misuc look,
+    // now keyed to a restrained violet accent (master spec §37).
     {"Misuc Graphite", "#0d121b", "#151c27", "#1c2531", "#0a0e15",
      "#28303e", "#354054", "#e8edf4", "#8a94a6", "#5b6472",
-     "#ff6b4a", "#4ade80", "#ff5c5c"},
+     "#8f7bfa", "#4ade80", "#ff5c5c"},
     // Cool midnight blue, blue accent.
     {"Midnight Blue", "#081120", "#101d31", "#162642", "#050b14",
      "#24344f", "#314566", "#eaf1fb", "#8fa4c3", "#5c6d8a",
@@ -64,10 +65,10 @@ const PresetRecord kPresets[] = {
     {"Amber Studio", "#191106", "#241a0c", "#2f2312", "#0f0a03",
      "#40301a", "#524023", "#faf3e8", "#c4a981", "#8f7a56",
      "#ffb454", "#4ade80", "#ff5c5c"},
-    // Deepest blacks for OLED panels; coral accent stays on-brand.
+    // Deepest blacks for OLED panels; violet accent completes the signature.
     {"OLED Black", "#000000", "#0a0a0b", "#121214", "#000000",
      "#1d1d20", "#2a2a2e", "#e9e9ec", "#7f7f88", "#52525a",
-     "#ff6b4a", "#4ade80", "#ff5c5c"},
+     "#8f7bfa", "#4ade80", "#ff5c5c"},
 };
 
 constexpr size_t kPresetCount = sizeof(kPresets) / sizeof(kPresets[0]);
@@ -191,7 +192,11 @@ void ThemeEngine::pushToTokens() const {
   theme::kTextMuted = pal_.textFaint;
   theme::kTextDisabled = blend(pal_.textFaint, pal_.background, 130);
   theme::kAccentHover = pal_.accent.lighter(114);
+  theme::kAccentActive = pal_.accent.lighter(126);
+  theme::kAccentFaint = QColor(pal_.accent);
+  theme::kAccentFaint.setAlpha(38);
   theme::kSelection = pal_.accentSoft;
+  theme::kMatteSurface = blend(pal_.panel, pal_.background, 70);
   theme::kPanelHeader = pal_.panel.darker(112);
   theme::kToolbar = pal_.background;
   theme::kTransport = pal_.background;
@@ -200,6 +205,7 @@ void ThemeEngine::pushToTokens() const {
   theme::kButton = pal_.panelRaised;
   theme::kButtonHover = blend(pal_.panelRaised, pal_.accent, 70);
   theme::kButtonPressed = pal_.panelSunken;
+  theme::kBorderStrong = pal_.borderBright;
 }
 
 QString ThemeEngine::buildStyleSheet() const {

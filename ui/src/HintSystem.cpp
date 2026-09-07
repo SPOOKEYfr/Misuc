@@ -7,6 +7,7 @@
 #include <QPainterPath>
 
 #include "Theme.h"
+#include "commands/MisucCommandRegistry.h"
 
 namespace misuc::ui {
 
@@ -15,6 +16,43 @@ constexpr int kChipH = 18;
 constexpr int kPad = 10;
 constexpr int kChipGap = 8;
 } // namespace
+
+Hint hintFromCommand(const QString& commandId) {
+  const core::MisucCommandRegistry& reg = core::MisucCommandRegistry::instance();
+  const core::MisucCommand* cmd = reg.command(commandId);
+  if (cmd == nullptr)
+    return Hint{};
+  Hint h;
+  h.name = cmd->name;
+  h.description = cmd->description;
+  h.commandId = commandId;
+  if (cmd->icon != icons::IconId::None)
+    h.icon = icons::make(cmd->icon, theme::kAccent);
+  if (!cmd->shortcut.isEmpty())
+    h.shortcut = cmd->shortcut.toString(QKeySequence::NativeText);
+  h.value = [commandId] {
+    const core::MisucCommandRegistry& r = core::MisucCommandRegistry::instance();
+    const core::MisucCommand* c = r.command(commandId);
+    if (c && c->value) {
+      try {
+        return c->value();
+      } catch (...) {
+        return QString();
+      }
+    }
+    if (c && c->checked) {
+      bool on = false;
+      try {
+        on = c->checked();
+      } catch (...) {
+        on = false;
+      }
+      return on ? QStringLiteral("on") : QStringLiteral("off");
+    }
+    return QString();
+  };
+  return h;
+}
 
 HintBar::HintBar(QWidget* parent) : QLabel(parent) {
   setObjectName(QStringLiteral("hintBar"));
@@ -61,6 +99,14 @@ void HintBar::paintEvent(QPaintEvent*) {
   // Available draw width.
   const int avail = width() - kPad - (chipW ? chipW + kChipGap : 0);
   int x = kPad;
+
+  // Lead icon (registry-backed hints carry the command glyph).
+  if (!hint_.icon.isNull()) {
+    const QIcon ic = hint_.icon;
+    const QRectF icr(x, yc - 9, 18, 18);
+    p.drawPixmap(icr, ic.pixmap(18, 18), QRectF(0, 0, 18, 18));
+    x += 24;
+  }
 
   if (!hint_.name.isEmpty()) {
     QFont nameFont = theme::uiFont(10, QFont::DemiBold);
@@ -114,7 +160,7 @@ HintManager::HintManager(HintBar* bar, QWidget* parent)
   if (bar_) {
     setDefaultHint(Hint{QStringLiteral("Misuc"),
                         QStringLiteral("Hover any control to learn it"),
-                        QString(), nullptr});
+                        QString(), QIcon(), QString(), nullptr});
   }
 }
 
@@ -135,11 +181,32 @@ void HintManager::registerHint(QWidget* widget, const QString& name,
                                const QString& description,
                                const QString& shortcut,
                                std::function<QString()> value) {
-  registerHint(widget, Hint{name, description, shortcut, std::move(value)});
+  registerHint(widget, Hint{name, description, shortcut, QIcon(), QString(),
+                            std::move(value)});
+}
+
+void HintManager::registerCommand(QWidget* widget, const QString& commandId) {
+  if (!widget)
+    return;
+  commandIds_[widget] = commandId;
+  widget->installEventFilter(this);
+}
+
+Hint HintManager::hintFor(const QWidget* widget) const {
+  auto itId = commandIds_.find(const_cast<QWidget*>(widget));
+  if (itId != commandIds_.end())
+    return hintFromCommand(itId->second);
+  auto it = hints_.find(const_cast<QWidget*>(widget));
+  return it == hints_.end() ? Hint{} : it->second;
 }
 
 void HintManager::refresh() {
   if (hovered_) {
+    auto itId = commandIds_.find(hovered_);
+    if (itId != commandIds_.end()) {
+      bar_->showHint(hintFromCommand(itId->second));
+      return;
+    }
     auto it = hints_.find(hovered_);
     if (it != hints_.end()) {
       bar_->showHint(it->second);
@@ -148,8 +215,7 @@ void HintManager::refresh() {
   }
   if (defaultHint_.value) {
     // Refresh live default value (e.g. transport position).
-    Hint h = defaultHint_;
-    bar_->showHint(h);
+    bar_->showHint(defaultHint_);
   }
 }
 
@@ -157,10 +223,10 @@ bool HintManager::eventFilter(QObject* watched, QEvent* event) {
   if (event->type() == QEvent::Enter || event->type() == QEvent::HoverEnter) {
     auto widget = qobject_cast<QWidget*>(watched);
     if (widget) {
-      auto it = hints_.find(widget);
-      if (it != hints_.end()) {
+      const Hint h = hintFor(widget);
+      if (!h.name.isEmpty() || !h.description.isEmpty()) {
         hovered_ = widget;
-        bar_->showHint(it->second);
+        bar_->showHint(h);
       }
     }
   } else if (event->type() == QEvent::Leave ||

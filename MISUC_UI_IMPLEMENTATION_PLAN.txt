@@ -1,205 +1,149 @@
 ================================================================================
-MISUC — UI IMPLEMENTATION PLAN  (Phase 1: UI FOUNDATION REDESIGN)
+MISUC — UI IMPLEMENTATION PLAN  (Master UI/UX Specification, §0–§83)
 ================================================================================
 Date:       2026-09-07
-Scope:      PHASE 1 ONLY per client spec §58/§70. Phase 2+ are NOT started.
-Golden rule: preserve the working audio foundation (§0) and keep every existing
-test + the UI harness green (§59-60, acceptance §19-20).
+Authority:  MISUC_UI_MASTER_SPEC (§0–§83) supersedes the earlier Phase-1-only
+            scope. The full modular DAW GUI is in scope now (§1: Playlist,
+            Channel Rack, Piano Roll, Mixer, Browser, Inspector, Plugin windows
+            are first-class, NOT postponable placeholders).
+Golden rules:
+  * Preserve the working audio foundation (§48) — the engine is NOT modified.
+  * Keep every existing test green: engine tests (misuc_tests) + the UI
+    harness (prbehave) must remain green after every stage (§63, §81).
+  * No fake features (§49): every new workspace has a real model/view or an
+    honest, documented boundary; never fabricate playback/DSP/windows.
+  * Charcoal-black + smoked glass + restrained violet accents (§36-38, §44).
+  * Icon-first (§6, §79): glyphs without permanent text where possible; the
+    CommandRegistry is the single source of truth for shortcuts, tooltips,
+    Hint Bar and menus (§7, §51, §78).
 
 -------------------------------------------------------------------------------
-1. CURRENT UI ARCHITECTURE
+1. BASELINE (already delivered, remains the foundation)
 -------------------------------------------------------------------------------
-- Shell: misuc::ui::MainWindow (already a QMainWindow) builds, in order:
-  * menu bar (File/Edit/Help) via buildMenus()
-  * a top TransportBar (custom-painted buttons, QWidget)
-  * a left nav rail (navLogo QLabel + checkable QPushButtons) driving a
-    QStackedWidget (pages_) of 5 real pages
-  * a bottom StatusPanel
-  * a 33 ms poll timer driving transport/service-state refresh
-- Pages (all engine-backed, all WORKING):
-  ProjectPage (name/tempo), EditorPage (+1320-line PianoRoll), MixerPage
-  (real engine mixer + meters), AudioSettingsPage (device/tone/groove/monitor/
-  gains/meters), ThemePage (presets/custom accent/glass).
-- Theming: theme::k* inline tokens (Theme.h) + ThemeEngine::Palette (11 base
-  colors, 8 presets, custom accent, glass material, QSS stylesheet, .misuctheme
-  file + QSettings persistence, themeChanged signal). buildStyleSheet() has
-  hard-coded hover/pressed colors and no QDock/QTab/ToolBar/StatusBar rules.
-- Audio engine + Session schema: MUST NOT change semantics. Engine untouched.
+- Shell: MainWindow = QMainWindow; HeaderBar (QToolBar) top = brand cluster
+  (navLogo+wordmark+project) | TransportBar | live status cluster (CPU/RAM from
+  /proc, sr, buffer+latency, xruns, state, mini meters). Central QTabWidget
+  (Project|Editor|Audio|Appearance). Mixer in QDockWidget. HintBar + StatusPanel
+  in QStatusBar. Workspace presets + QSettings layout persistence. F7/F9/Space.
+- Theme: theme::k* tokens + ThemeEngine (8 presets, custom accent, glass,
+  QSS, .misuctheme + QSettings persistence, all paint-time token driven).
+- HintSystem: HintBar + HintManager (per-widget event-filter registry).
+- Contract (must never break): MainWindow::session()/sessionEdited()/
+  setExportPathOverride()/writeProject()/openProject(); menu actions
+  "Export &Audio..." and "&About Misuc..."; QLabel objectName "navLogo" with
+  pixmap width > 20; the FIRST QListWidget in the window stays the editor track
+  list (nothing may add a QListWidget before EditorPage is created); MixerPage/
+  ChannelStrip/Fader findChildren + master-fader-semiclassification; ThemeEngine
+  accent-equality; PianoRoll pixel-identical defaults at stock theme.
+  Carets/loop use theme::kPlayhead/kLoopRegion tokens; velocity bars, selection
+  and OK-status stay theme::kOk.
 
 -------------------------------------------------------------------------------
-2. PROPOSED ARCHITECTURE  (Phase 1 target)
+2. TARGET ARCHITECTURE (per master spec)
 -------------------------------------------------------------------------------
-A modular, dock-based DAW shell with a persistent global header and a
-cross-app hint system. Structural, not a recolor:
+Workspaces (each a real widget, dockable/floating/visible via VIEW + header
+strip + shortcuts):
+  * Playlist    (central, largest): track lanes + timeline ruler + violet
+                playhead; real Session clips rendered per type
+                (audio/MIDI/pattern/automation) with distinct visual language;
+                real edit ops (select/move/Ctrl+D/delete/rename/mute/snap,
+                resize-right, trim-left, split) driving Session + undo.
+  * Piano Roll  (EditorPage, dockable): existing 1320-line editor kept intact;
+                caret now uses violet theme::kPlayhead.
+  * Channel Rack: real model/view (QAbstractItemModel) starter lineup
+                Kick/Snare/Hi-Hat/Bass/Sampler; step sequencer (16 steps),
+                per-channel volume/pan/mute/solo, add/remove/rename/duplicate.
+                Honest boundary: step-pattern audio output requires engine
+                pattern playback (future) — documented, no fake audio.
+  * Mixer       (existing MixerPage, dockable): real engine mixer. Keep APIs.
+  * Browser     (left dock): categories All / Current Project / Samples / Audio /
+                MIDI / Instruments / Effects / Plugins / Presets / Favorites /
+                Recent; search; real metadata + waveform preview for audio
+                (SndFile read, honest), preview play through the engine's real
+                clip-playback path, drag/drop inserts real Session clips/notes.
+  * Inspector   (right dock): context-sensitive properties for the current
+                selection (playlist clip/track, mixer strip, piano-roll note);
+                live Session-backed fields where the schema supports editing,
+                read-only where it does not.
+  * Plugin      (architecture + discovery UI only, §27-29): category views
+                Built-in/External/User/Favorites/Recent + naming conventions
+                for a future VST3/LV2 bridge. NO fake DSP, NO fake plugin
+                windows. Honest empty-states with descriptions.
 
-  [ Global Header (QToolBar, spans full width) ]
-    left   : navLogo + "MISUC" wordmark + project name
-    center : compact TransportBar + metronome/count-in/loop + tempo spin
-    right  : app CPU% / RSS / sample rate / buffer+latency / xruns /
-             audio state / master mini meters (L/R + clip)
-  [ Central workspace = QTabWidget with real tabs ]
-    Project | Editor (Piano Roll) | Audio | Appearance
-  [ Dockable panels ]
-    Mixer dock (QDockWidget, bottom area, closable/floatable/movable/tabbable)
-  [ QStatusBar ]
-    left: HintBar (persistent contextual hints)   right: StatusPanel
-  [ Menu bar ]
-    File / Edit / Workspace / Help
-    Workspace = layout presets (Default, Mixing, Piano Roll, Recording) +
-                "Panels > Mixer" toggle; layout persisted via QSettings.
+Workflow with dock pragmatics:
+  * DockWidgets: PlaylistDock (central, non-closable core), BrowserDock L,
+    InspectorDock R, MixerDock B, PianoRollDock (F), ChannelRackDock (F).
+  * Every dock: closable/movable/floatable; tab-able; geometry + visibility +
+    splitter sizes persisted (QSettings, versioned) with out-of-screen recovery.
+  * Everything inside workspaces uses layouts/splitters only — no absolute
+    positioning — so 1280x720→3840x2160 and 100–200% scaling never overlap.
 
-Everything a user can see is either a real control wired to the engine/session,
-or intentionally absent (no fake Browser/Channel Rack/Playlist/plugins — those
-are later phases and MUST NOT exist as mockups per §62).
-
--------------------------------------------------------------------------------
-3. FILES THAT WILL CHANGE
--------------------------------------------------------------------------------
-CREATE
-  ui/src/branding/Icons.{h,cpp}      vector QIcon set (play/stop/record/
-                                     metronome/count/loop + helpers)
-  ui/src/HintSystem.{h,cpp}          HintBar widget + control registry +
-                                     hover event filter + value refresh
-  ui/src/HeaderBar.{h,cpp}           global header (logo cluster, transport
-                                     slot, status cluster; /proc CPU/RSS)
-  MISUC_UI_IMPLEMENTATION_PLAN.txt   this document
-EDIT
-  ui/src/Theme.h                     +~24 semantic tokens (charcoal/glass;
-                                     editor-neutral tokens keep exact pixels)
-  ui/src/theme/ThemeEngine.cpp       pushToTokens for new tokens; stylesheet:
-                                     QDockWidget/QTab*/QToolBar/QStatusBar/
-                                     QSpinBox + token-ize hardcoded hover colors
-  ui/src/TransportBar.{h,cpp}        compact big-hit transport; metronome
-                                     toggle; count-in now really calls
-                                     engine_.setMetronome(); loop glyph;
-                                     tooltips + hint registration hooks
-  ui/src/MainWindow.{h,cpp}          new shell: header toolbar, tab workspace,
-                                     mixer dock, status bar w/ HintBar,
-                                     workspace presets + layout persist,
-                                     F7/F9/Space actions, master-gain apply,
-                                     header/poll updates
-  ui/src/mixer/MixerPage.cpp         master fader init/persist via Session;
-                                     kStripColors[0] follows theme accent
-  ui/src/mixer/ChannelStrip.cpp      default strip color from theme token
-  ui/src/PianoRoll.cpp               replace 6 paint literals with tokens
-                                     (identical pixel output at stock theme)
-  engine/include/.../Session.h +     additive transport.masterGainDb field
-  engine/src/project/Session.cpp
-  ui/CMakeLists.txt                  register new UI sources
-  /tmp/opencode/build_prbehave.sh    register new sources/mocs (harness)
-  ARCHITECTURE.md / ROADMAP.md / MISUC_CURRENT_STATUS.txt  (docs, §63)
+Infrastructure:
+  * theme tokens: full §38 set (matte surfaces, grid strong, clip-type colors,
+    accent-active, violet playhead/loop, glass tuned more transparent+matte).
+  * IconSet (branding/Icons.*): coherent vector glyph table for every command.
+  * MisucCommandRegistry (ui/src/commands/): ID/Name/Description/Shortcut/
+    Icon/Category/State/Value-provider/Trigger; single source for
+    menu+toolbar+tooltip+HintBar+shortcuts+accessibility.
+  * MisucTooltip (ui/src/tooltip/): premium glass hover surface, small delay,
+    follows cursor, clamped to screen; text from CommandRegistry.
+  * HintBar: promoted to registry-backed rendering (icon+name+description+
+    value+shortcut), still poll-refreshed for live values.
+  * HeaderBar: + workspace icon strip (Playlist/PianoRoll/ChannelRack/Mixer/
+    Browser/Inspector), snap + song/pattern + live time in TransportBar,
+    menus restructured to FILE/EDIT/ADD/PATTERNS/VIEW/OPTIONS/TOOLS/HELP.
+  * Linux branding: .desktop StartupWMClass, scalable/512 icon install rules.
+  * .deb: CPack DEB; verify with desktop-file-validate + dpkg-deb --info/.
 
 -------------------------------------------------------------------------------
-4. FILES THAT MUST REMAIN STABLE (do not rewrite)
+3. IMPLEMENTATION ORDER (build + tests after each stage, §74)
 -------------------------------------------------------------------------------
-  engine/  (entire audio engine, DSP, transport, backend, undo)   UNTOUCHED
-  ui/src/PianoRoll.{h,cpp}          geometry + editing logic   (color tokens
-                                     is the ONLY change, pixel-identical)
-  ui/src/EditorPage.{h,cpp}         harness depends on it (Add/Remove buttons,
-                                     QListWidget, QCheckBox, piano child)
-  ui/src/ThemePage.cpp, AudioSettingsPage.cpp, ProjectPage.cpp, StatusPanel.cpp,
-  ui/src/mixer/ChannelStrip/Fader/Knob/VerticalMeter/MixerPage  (APIs preserved;
-                                     only master-persist + token tweaks)
-  branding/AboutDialog.cpp, branding/Logo.{h,cpp}
-  filesystem/Session JSON schema:  all existing fields/round-trips preserved.
+ 1. Theme tokens + violet default accent + tuned glass (Theme.h, ThemeEngine).
+ 2. IconSet vector glyph library.
+ 3. MisucCommandRegistry.
+ 4. HintBar registry upgrade + MisucTooltip.
+ 5. TransportBar snap/mode/live-time + HeaderBar workspace strip.
+ 6. WorkspaceManager (docks, visibility, presets, persistence, safe restore).
+ 7. Menu restructure (FILE/EDIT/ADD/PATTERNS/VIEW/OPTIONS/TOOLS/HELP) + F5/F6/
+    F8/F9 wiring through the registry.
+ 8. Playlist workspace (real model/view + interactions + violet playhead).
+ 9. Browser workspace (categories, search, preview, drag/drop).
+10. Channel Rack workspace (real model/view + steps + starter lineup).
+11. Piano Roll caret → violet; keep all pixel-expectation behavior.
+12. Inspector (context panel).
+13. Linux branding + icon install + .deb packaging + verifications.
+14. Harness: update violet caret expectation; add new-way checks; keep 213+
+    behavioral checks green.
+15. Full build, engine tests, harness, smoke, multi-resolution/DPI launches.
+16. Manual visual QA pass (screenshots at several sizes) — fix collisions,
+    clipping, contrast, glass-depth issues found.
+17. Docs (ROADMAP/ARCHITECTURE/CURRENT_STATUS) + logical git commits.
+18. §83 final report (18 items) + §81 acceptance checklist honesty.
 
 -------------------------------------------------------------------------------
-5. MIGRATION STRATEGY
+4. DESIGN SYSTEM SUMMARY (§36-38, §44, §66-68)
 -------------------------------------------------------------------------------
-- Stepwise, compile-clean at each step; shell swap happens LAST in the PR.
-- Keep the exact public API the harness pins:
-    MainWindow::{session(), sessionEdited(), setExportPathOverride(),
-                 writeProject(), openProject(), menuBar()}
-    EditorPage(Add/Remove/mute/track list/piano child), MixerPage strips,
-    Fader::setValueDb/valueDb, ChannelStrip setters, ThemeEngine surface,
-    AboutDialog fields, the "navLogo" QLabel objectName,
-    and the default-theme pixel colors PianoRoll asserts (playhead/loop/clip).
-- The nav rail is REMOVED from the visual, but navLogo QLabel survives inside
-  the header (same objectName) so branding checks pass.
-- QStackedWidget → QTabWidget for the central workspace; page order preserved
-  so the first QListWidget child is still the editor track list.
-- Mixer moves from page to QDockWidget; QDockWidget state is the unit of
-  layout persistence (restoreState/saveState).
-- Metronome/count-in become REAL (engine_.setMetronome) — currently the count-
-  in button is cosmetic (an existing functional gap §31 fixed here).
+- Palette: charcoal-black (#0d121b family), smoked translucent glass, matte
+  surfaces, restrained violet accent (default accent #8f7bfa family), positive
+  status stays kOk (readability + backward compat), violet playheads/loop.
+- Icons: 1.4px-line coherent vector set, painted from theme tokens.
+- Radii: small and controlled (2–8px); high density (§68); no huge controls.
+- Glass: subtle depth layers (background → workspace → glass → elevated →
+  active); graceful opaque fallback without GPU (§46).
+- Typography: uiFont(10)/monoFont for numerals/positions/times.
 
 -------------------------------------------------------------------------------
-6. THEME ARCHITECTURE  (Phase 1)
--------------------------------------------------------------------------------
-- Keep ThemeEngine + 8 presets + custom accent + glass + .misuctheme.
-- Add semantic tokens: backgroundSecondary, surface, surfaceElevated,
-  surfaceGlass(Strong), borderSubtle, textSecondary, textMuted, textDisabled,
-  accentHover, accentPressed(exists), selection, grid, playhead, loopregion,
-  notebody, clipbody, clipwave, noteSelected, meterNormal/Hot/Clip,
-  panelHeader, toolbar, button/Hover/Pressed, tooltipBg, hintBar, transport,
-  gridRow, marquee.
-- Theme-driven ones pushed from Palette on every apply (whole app re-colors);
-  editor-neutral editor/playhead/clip tokens keep fixed stock values so
-  composition readability is constant and the harness pixel checks stay green
-  (documented as a later-phase item to make them accent-following).
-- Default preset = premium charcoal glass: near-black workspace, layered
-  charcoal surfaces, restrained coral accent, subtle translucent borders.
-  No RGB/gaming styling (§55).
-
--------------------------------------------------------------------------------
-7. WORKSPACE ARCHITECTURE  (Phase 1)
--------------------------------------------------------------------------------
-- Central QTabWidget: Project | Editor | Audio | Appearance (all real pages).
-- Mixer QDockWidget (bottom); closable/floatable/movable; QSettings persists
-  dock layout + tab choice across runs; workspaces menu switches presets
-  (Default / Mixing / Piano Roll / Recording) — each really changes which
-  dock/tab is shown.
-- Shortcuts now wired (real): F7 = Piano Roll (editor tab), F9 = toggle Mixer,
-  Space = play/stop. F5/F6/F8 stay unassigned until Playlist/Channel Rack/
-  Browser exist (no fake shortcuts).
-
--------------------------------------------------------------------------------
-8. PLUGIN ARCHITECTURE  (NOT in Phase 1 — design note only)
--------------------------------------------------------------------------------
-- No plugin code, no fake listings. Later phases: PluginManager + Scanner,
-  DB (LV2 .lv2 / VST3 .vst3), ProcSlot per track on the audio graph using the
-  existing per-track scratch buffers, host later. No proprietary bundles.
-  Not started until Phase 9-10 per §58.
-
--------------------------------------------------------------------------------
-9. PACKAGING STRATEGY  (Phase 2 — decided but not executed)
--------------------------------------------------------------------------------
-- .desktop StartupWMClass=misuc_app, scalable/512 icon, cmake --install rules,
-  cpack/deb generation (misuc_0.1.0_amd64.deb), dpkg-deb --info/--contents QA,
-  uninstall check. Executed after Phase 1 lands.
-
--------------------------------------------------------------------------------
-10. TEST STRATEGY  (unchanged gate, run after EVERY phase §59)
+5. TEST STRATEGY (§63) — unchanged command set
 -------------------------------------------------------------------------------
   cmake --build build
-  ./build/bin/misuc_tests              (expect ~54145 checks, 0 failures)
-  env QT_QPA_PLATFORM=wayland /tmp/opencode/prbehave   (expect ALL OK; + new
-        checks for header/hint/workspace added in Phase 1)
-  timeout 6 env QT_QPA_PLATFORM=wayland ./build/bin/misuc_app  (rc=124)
-  desktop-file-validate assets/desktop/misuc.desktop     (rc=0)
-- New harness phases (Phase 16+): global header exists; navLogo still paints;
-  metronome toggle flips engine metronome; count-in toggle really writes
-  engine metronome; central tabs + mixer dock exist and reactor to session;
-  HintBar updates on hover of a registered control; workspace preset changes
-  dock visibility.
+  ./build/bin/misuc_tests                     # engine, expect 54145+ / 0 fail
+  env QT_QPA_PLATFORM=wayland /tmp/opencode/prbehave   # harness 213+ ALL OK
+  timeout 6 env QT_QPA_PLATFORM=wayland ./build/bin/misuc_app   # rc=124 smoke
+  also launch at 1280x720 / 1920x1080 / (e.g.) 2560x1440 and watch pixel-size
+  layout regressions via screenshots (§40-41, §64).
+  Desktop: desktop-file-validate assets/desktop/misuc.desktop (rc=0);
+  dpkg-deb --info/--contents on the built .deb.
 
--------------------------------------------------------------------------------
-11. IMPLEMENTATION PHASES (this document covers Phase 1; §58 lanes)
--------------------------------------------------------------------------------
-P1  UI foundation redesign.......... THIS PR
-P2  desktop branding + .deb
-P3  Browser
-P4  Channel Rack
-P5  Playlist / arrangement
-P6  Piano Roll integration (controller lanes, first-class workspace)
-P7  Mixer redesign (bus/return strips, FX rack)
-P8  Buses/routing (explicit graph, shared by playback + export)
-P9  Plugin architecture
-P10 LV2/VST3 hosting
-P11 Automation
-P12 Built-in instruments
-P13 Built-in effects
-P14 Autosave / recovery
-P15 Polish + QA (+ new UI tests §60, manual checklist §61)
-
-END — Phase 1 only. Code follows after this plan is accepted.
+================================================================================
+END OF PLAN
+================================================================================

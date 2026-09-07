@@ -28,6 +28,11 @@ class AudioSettingsPage;
 class MixerPage;
 class ThemePage;
 class TransportBar;
+class Playlist;
+class ChannelRack;
+class Browser;
+class Inspector;
+class WorkspaceManager;
 
 // Application shell: global header toolbar (brand + transport + status),
 // a tabbed central workspace (Project / Editor / Audio / Appearance), a
@@ -59,9 +64,12 @@ protected:
 private:
   void buildMenus();
   void buildPages();
+  void buildCommands();
   void poll();
   void feedPlayhead();
   void onSessionEdited();
+  void refreshInspector();
+  void syncWorkspaceStrip();
   // Help -> About Misuc…
   void showAbout();
   void applyLayoutPreset(const QString& name);
@@ -104,6 +112,11 @@ private:
   AudioSettingsPage* audioSettings_ = nullptr;
   MixerPage* mixerPage_ = nullptr;
   ThemePage* themePage_ = nullptr;
+  Playlist* playlist_ = nullptr;
+  ChannelRack* channelRack_ = nullptr;
+  Browser* browser_ = nullptr;
+  Inspector* inspector_ = nullptr;
+  WorkspaceManager* wsMan_ = nullptr;
   QTimer* timer_ = nullptr;
   QTabWidget* workspace_ = nullptr;
   QDockWidget* mixerDock_ = nullptr;
@@ -119,6 +132,12 @@ private:
 
   QAction* undoCmd_ = nullptr;
   QAction* redoCmd_ = nullptr;
+  QAction* snapCmd_ = nullptr;
+  QAction* modeCmd_ = nullptr;   // song/pattern
+  QAction* metronomeCmd_ = nullptr;
+  QString inspectorClipId_;
+  int inspectorTrackRow_ = -1;
+  bool inspectorOnClip_ = false;
 };
 
 } // namespace misuc::ui

@@ -19,6 +19,10 @@ public:
   void setCountInOn(bool on);
   void setLoopOn(bool on);
   void setRecording(bool on) { recording_ = on; update(); }
+  void setSnapOn(bool on);
+  void setSongMode(bool song);
+  bool snapOn() const { return snap_; }
+  bool songMode() const { return songMode_; }
   void refresh(); // pull playhead + tempo state
 
 signals:
@@ -26,6 +30,8 @@ signals:
   void countInToggled(bool on);
   void loopToggled(bool on);
   void recordToggled(bool on);
+  void snapToggled(bool on);
+  void modeToggled(bool song);
 
 protected:
   void paintEvent(QPaintEvent* event) override;
@@ -39,6 +45,8 @@ private:
   bool countIn_ = false;
   bool loopOn_ = false;
   bool recording_ = false;
+  bool snap_ = true;
+  bool songMode_ = true;
   uint64_t playhead_ = 0;
   double tempo_ = 120.0;
   int tsNum_ = 4;
@@ -49,6 +57,8 @@ private:
   QRectF clickBtn_;
   QRectF loopBtn_;
   QRectF recordBtn_;
+  QRectF snapBtn_;
+  QRectF modeBtn_;
   QRectF displayRect_;
 };
 

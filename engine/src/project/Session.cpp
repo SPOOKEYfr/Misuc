@@ -60,6 +60,9 @@ std::string Session::toJson() const {
   transportObj.emplace("timeSigNumerator", Json(tsNum_));
   transportObj.emplace("timeSigDenominator", Json(tsDen_));
   transportObj.emplace("sampleRate", Json(static_cast<double>(sampleRate_)));
+  transportObj.emplace("loopMode", Json(loopMode_));
+  transportObj.emplace("loopStartBeats", Json(loopStartBeats_));
+  transportObj.emplace("loopEndBeats", Json(loopEndBeats_));
   root.emplace("transport", Json(std::move(transportObj)));
 
   Json::Array tracks;
@@ -107,6 +110,16 @@ Session Session::fromJson(const std::string& text) {
       s.setTimeSignature(s.timeSigNumerator(), static_cast<int>(f->second.number()));
     if (auto f = t.find("sampleRate"); f != t.end() && f->second.isNumber())
       s.setSampleRate(static_cast<uint32_t>(f->second.number()));
+    bool loopMode = false;
+    double ls = 0.0;
+    double le = 4.0;
+    if (auto f = t.find("loopMode"); f != t.end() && f->second.isBool())
+      loopMode = f->second.boolean();
+    if (auto f = t.find("loopStartBeats"); f != t.end() && f->second.isNumber())
+      ls = f->second.number();
+    if (auto f = t.find("loopEndBeats"); f != t.end() && f->second.isNumber())
+      le = f->second.number();
+    s.setLoop(loopMode, ls, le);
   }
 
   if (auto f = root.find("metadata"); f != root.end() && f->second.isObject()) {

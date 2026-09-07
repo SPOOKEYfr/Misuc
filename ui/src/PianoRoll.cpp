@@ -65,6 +65,49 @@ void PianoRuler::setPlayheadBeat(double beats, bool visible) {
   update();
 }
 
+void PianoRuler::setLoop(bool on, double startBeats, double endBeats) {
+  loopOn_ = on;
+  loopStartBeats_ = startBeats;
+  loopEndBeats_ = endBeats;
+  update();
+}
+
+double PianoRuler::beatAtX(double x) const {
+  return std::clamp((x + hbar_) / static_cast<double>(pxPerBeat_), 0.0,
+                    numBeats_);
+}
+
+void PianoRuler::mousePressEvent(QMouseEvent* event) {
+  if (event->button() == Qt::LeftButton) {
+    grabbingLoop_ = true;
+    grabStartBeat_ = grabEndBeat_ = beatAtX(event->position().x());
+    update();
+    return;
+  }
+  QWidget::mousePressEvent(event);
+}
+
+void PianoRuler::mouseMoveEvent(QMouseEvent* event) {
+  if (grabbingLoop_) {
+    grabEndBeat_ = beatAtX(event->position().x());
+    update();
+    return;
+  }
+  QWidget::mouseMoveEvent(event);
+}
+
+void PianoRuler::mouseReleaseEvent(QMouseEvent* event) {
+  if (grabbingLoop_) {
+    grabbingLoop_ = false;
+    const double lo = std::min(grabStartBeat_, grabEndBeat_);
+    const double hi = std::max(grabStartBeat_, grabEndBeat_);
+    if (onLoopDrawn && hi - lo >= kSnapBeats)
+      onLoopDrawn(lo, hi);
+    return;
+  }
+  QWidget::mouseReleaseEvent(event);
+}
+
 void PianoRuler::setHorizon(double numBeats, int pxPerBeat, int barBeats,
                             int hbar) {
   numBeats_ = numBeats;
@@ -109,6 +152,27 @@ void PianoRuler::paintEvent(QPaintEvent*) {
       const double x = barX + beat * px;
       p.setPen(QPen(theme::kBorder, 1));
       p.drawLine(QPointF(x, height() - 8), QPointF(x, height() - 1));
+    }
+  }
+
+  // Loop region: shaded area + edge lines (live drag preview when grabbing).
+  if (loopOn_ || grabbingLoop_) {
+    double lo = loopStartBeats_;
+    double hi = loopEndBeats_;
+    if (grabbingLoop_) {
+      lo = std::min(grabStartBeat_, grabEndBeat_);
+      hi = std::max(grabStartBeat_, grabEndBeat_);
+    }
+    if (hi > lo) {
+      const double lx = lo * px - hbar_;
+      const double hx = hi * px - hbar_;
+      QRectF region(lx, 2, hx - lx, height() - 4);
+      if (region.intersects(QRectF(-1, 2, width() + 2, height() - 4))) {
+        p.fillRect(region, QColor(0x4a, 0xde, 0x80, 40));
+        p.setPen(QPen(theme::kOk, 1.5));
+        p.drawLine(QPointF(lx, 2), QPointF(lx, height() - 2));
+        p.drawLine(QPointF(hx, 2), QPointF(hx, height() - 2));
+      }
     }
   }
 
@@ -790,6 +854,15 @@ PianoRoll::PianoRoll(misuc::project::Session& session, QWidget* parent)
   topRow->addWidget(corner);
   topRow->addWidget(ruler_, 1);
   root->addLayout(topRow);
+  ruler_->onLoopDrawn = [this](double lo, double hi) {
+    const double fs = std::round(lo / kSnapBeats) * kSnapBeats;
+    const double fe = std::round(hi / kSnapBeats) * kSnapBeats;
+    if (fe - fs < kSnapBeats)
+      return;
+    session_.setLoop(true, fs, fe);
+    ruler_->setLoop(true, fs, fe);
+    emit edited();
+  };
 
   auto* lowRow = new QHBoxLayout();
   lowRow->setSpacing(0);
@@ -824,6 +897,11 @@ void PianoRoll::setTrack(const QString& id) {
   refresh();
 }
 
+void PianoRoll::setLoop(bool on, double startBeats, double endBeats) {
+  if (ruler_)
+    ruler_->setLoop(on, startBeats, endBeats);
+}
+
 void PianoRoll::quantize() {
   canvas_->quantizeSelection();
 }
@@ -840,6 +918,8 @@ void PianoRoll::refresh() {
   ruler_->setHorizon(kHorizonBeats, static_cast<int>(pxPerBeat_), barBeats,
                      hbarValue_);
   ruler_->setPlayheadBeat(playheadBeats_, playheadBeats_ >= 0.0);
+  ruler_->setLoop(session_.loopMode(), session_.loopStart(),
+                  session_.loopEnd());
   keys_->setRange(kLowPitch, kRowH, vbarValue_);
   if (canvas_) {
     canvas_->setPlayheadBeat(playheadBeats_, playheadBeats_ >= 0.0);

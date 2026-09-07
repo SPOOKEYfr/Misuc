@@ -47,6 +47,16 @@ MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
   // Top transport bar.
   transport_ = new TransportBar(engine_, this);
   root->addWidget(transport_);
+  connect(transport_, &TransportBar::loopToggled, this, [this](bool on) {
+    if (on) {
+      applyLoopToEngine(session_);
+      editorPage_->piano()->setLoop(true, session_.loopStart(),
+                                    session_.loopEnd());
+    } else {
+      engine_.setLoop(false, 0.0, 0.0);
+      editorPage_->piano()->setLoop(false, 0.0, 0.0);
+    }
+  });
 
   // Middle: nav rail + page stack.
   auto* middle = new QWidget(central);
@@ -166,6 +176,7 @@ void MainWindow::onSessionEdited() {
   undo_.push(session_);
   dirty_ = true;
   applyTempoToEngine();
+  applyLoopToEngine(session_);
   rebuildMidiScore();
   undoCmd_->setEnabled(undo_.canUndo());
   redoCmd_->setEnabled(undo_.canRedo());
@@ -257,6 +268,7 @@ void MainWindow::openProject(const QString& path) {
   projectPage_->refresh();
   editorPage_->refresh();
   applyTempoToEngine();
+  applyLoopToEngine(session_);
   rebuildMidiScore();
   undoCmd_->setEnabled(false);
   redoCmd_->setEnabled(false);
@@ -298,6 +310,7 @@ void MainWindow::performUndo() {
   projectPage_->refresh();
   editorPage_->refresh();
   applyTempoToEngine();
+  applyLoopToEngine(session_);
   rebuildMidiScore();
   dirty_ = true;
   undoCmd_->setEnabled(undo_.canUndo());
@@ -312,6 +325,7 @@ void MainWindow::performRedo() {
   projectPage_->refresh();
   editorPage_->refresh();
   applyTempoToEngine();
+  applyLoopToEngine(session_);
   rebuildMidiScore();
   dirty_ = true;
   undoCmd_->setEnabled(undo_.canUndo());
@@ -320,6 +334,10 @@ void MainWindow::performRedo() {
 }
 
 void MainWindow::applyTempoToEngine() { engine_.setTempo(session_.tempo()); }
+
+void MainWindow::applyLoopToEngine(misuc::project::Session& s) {
+  engine_.setLoop(s.loopMode(), s.loopStart(), s.loopEnd());
+}
 
 void MainWindow::updateWindowTitle() {
   const QString& name = QString::fromStdString(session_.name());

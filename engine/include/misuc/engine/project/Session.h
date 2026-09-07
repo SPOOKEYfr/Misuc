@@ -54,6 +54,16 @@ public:
   uint32_t sampleRate() const { return sampleRate_; }
   void setSampleRate(uint32_t sr) { sampleRate_ = sr; }
 
+  // Loop region (beats) persisted with the project.
+  bool loopMode() const { return loopMode_; }
+  double loopStart() const { return loopStartBeats_; }
+  double loopEnd() const { return loopEndBeats_; }
+  void setLoop(bool on, double startBeats, double endBeats) {
+    loopMode_ = on && endBeats > startBeats;
+    loopStartBeats_ = startBeats;
+    loopEndBeats_ = endBeats;
+  }
+
   // Tracks ----------------------------------------------------------------
   const std::vector<Track>& tracks() const { return tracks_; }
   std::vector<Track>& tracks() { return tracks_; }
@@ -78,6 +88,9 @@ private:
   int tsNum_ = 4;
   int tsDen_ = 4;
   uint32_t sampleRate_ = 48000;
+  bool loopMode_ = false;
+  double loopStartBeats_ = 0.0;
+  double loopEndBeats_ = 4.0;
   std::vector<Track> tracks_;
   uint32_t trackCounter_ = 0;
 };

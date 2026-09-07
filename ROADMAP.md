@@ -229,6 +229,27 @@ be refined as development proceeds.
   unselected notes run also works, off-grid neighbors are untouched, and no
   audition fires during quantize.
 
+## Phase 8 — Loop-region playback (done)
+
+- The transport now supports a loop region end-to-end: a `Loop` control kind
+  (`AudioEngine::setLoop`) carries enabled + start/end **beats** onto the audio
+  thread, which converts them to transport frames and drives the existing
+  `Transport::setLooping`/`setLoopRange` wrap in `advance()`.
+- The loop region is persisted in the Session (`loopMode` / `loopStartBeats` /
+  `loopEndBeats`) and flows through the same undo/redo, new/open/save paths as
+  tempo.
+- UI: a `LOOP` button on the transport bar toggles the engine region on/off; the
+  piano-roll ruler shades the region in green and lets you redraw it by dragging
+  across the ruler (snapped, one undo step).
+- No change to the MIDI player: on wrap the block start lands near `loopStart`,
+  the player's rewind detection restarts the scan, and the deterministic
+  rewind-render test still holds.
+- Engine suite 54009 checks / 0 failures (+6: loop serialization round-trip,
+  disabled-mode overrides, disabled transport does not wrap). UI harness (115
+  checks, +8): a ruler drag sets the session to [2,6] with one edit, the ruler
+  paints the shaded region (1560 loop pixels vs 0 outside), and the region
+  survives a save/load round-trip.
+
 ## Phase 8+ — Beyond
 
 - VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU

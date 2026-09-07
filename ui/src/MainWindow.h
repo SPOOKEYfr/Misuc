@@ -2,6 +2,7 @@
 
 #include <QMainWindow>
 #include <QString>
+#include <optional>
 
 #include <misuc/engine/core/UndoStack.h>
 #include <misuc/engine/project/Session.h>
@@ -51,6 +52,7 @@ private:
   void performUndo();
   void performRedo();
   void applyTempoToEngine();
+  void applyLoopToEngine(misuc::project::Session& s);
   void rebuildMidiScore();
   void updateWindowTitle();
 

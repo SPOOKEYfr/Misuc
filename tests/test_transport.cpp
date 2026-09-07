@@ -39,6 +39,17 @@ TEST_CASE(transport_loop_wrap) {
   TEST_ASSERT(t.positionFrames() == 48000);
 }
 
+TEST_CASE(transport_loop_disabled_does_not_wrap) {
+  Transport t;
+  t.setSampleRate(48000);
+  t.setLooping(false);
+  t.setLoopRange(48000, 96000);
+  t.setPosition(96000);
+  t.play();
+  t.advance(48000); // would wrap if enabled
+  TEST_ASSERT(t.positionFrames() == 144000);
+}
+
 TEST_CASE(transport_format_position) {
   Transport t;
   t.setSampleRate(48000);

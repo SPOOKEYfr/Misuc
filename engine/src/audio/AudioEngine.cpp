@@ -126,6 +126,16 @@ void AudioEngine::setGroove(bool enabled) {
     controlsDropped_.fetch_add(1);
 }
 
+void AudioEngine::setLoop(bool enabled, double startBeats, double endBeats) {
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::Loop);
+  m.f0 = enabled ? 1.f : 0.f;
+  m.d0 = startBeats;
+  m.d1 = endBeats;
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
 void AudioEngine::setMonitorGainDb(float db) {
   monitorGain_ = dsp::gainFromDb(db);
   ControlMessage m;
@@ -277,6 +287,17 @@ void AudioEngine::drainControls() noexcept {
         midiPlayer_.triggerPreview(static_cast<double>(wallFrames_),
                                    0.35 * sampleRate_, m.d0, m.f0);
         break;
+      case ControlKind::Loop: {
+        const bool on = m.f0 > 0.f;
+        transport_.setLooping(on);
+        if (on && m.d1 > m.d0) {
+          const double fpb = transport_.framesPerBeat();
+          transport_.setLoopRange(
+              static_cast<uint64_t>(m.d0 * fpb),
+              static_cast<uint64_t>(m.d1 * fpb));
+        }
+        break;
+      }
     }
   }
 }

@@ -2,32 +2,49 @@
 
 #include <QWidget>
 #include <QString>
+#include <functional>
 
 #include <misuc/engine/project/Session.h>
 
 class QScrollArea;
 class QScrollBar;
+class QMouseEvent;
 
 namespace misuc::ui {
 
-// Ruler above the piano-roll canvas; scrolls horizontally with it.
+// Ruler above the piano-roll canvas; scrolls horizontally with it. Also shows
+// the loop region and lets you draw it by dragging.
 class PianoRuler : public QWidget {
   Q_OBJECT
 public:
   explicit PianoRuler(QWidget* parent = nullptr);
   void setHorizon(double numBeats, int pxPerBeat, int barBeats, int hbar);
   void setPlayheadBeat(double beats, bool visible);
+  void setLoop(bool on, double startBeats, double endBeats);
+  // Callback for a completed loop-region drag (normalized start/end beats).
+  std::function<void(double, double)> onLoopDrawn;
 
 protected:
   void paintEvent(QPaintEvent* event) override;
+  void mousePressEvent(QMouseEvent* event) override;
+  void mouseMoveEvent(QMouseEvent* event) override;
+  void mouseReleaseEvent(QMouseEvent* event) override;
 
 private:
+  double beatAtX(double x) const;
+
   double numBeats_ = 64.0;
   int pxPerBeat_ = 40;
   int barBeats_ = 4;
   int hbar_ = 0;
   double playheadBeats_ = -1.0;
   bool playheadVisible_ = false;
+  bool loopOn_ = false;
+  double loopStartBeats_ = 0.0;
+  double loopEndBeats_ = 4.0;
+  bool grabbingLoop_ = false;
+  double grabStartBeat_ = 0.0;
+  double grabEndBeat_ = 0.0;
 };
 
 // Piano-key column left of the canvas; scrolls vertically with it.
@@ -62,6 +79,8 @@ private:
 //  - Ctrl+C copies the selection, Ctrl+V pastes it (at the playhead when one is
 //    shown, else one grid step to the right of the copy origin), and Ctrl+D
 //    duplicates it right next to itself — each paste is one undo snapshot.
+//  - The ruler shows a green loop region; drag across the ruler to set it
+//    (snapped to the grid, persisted with the project, live in the engine).
 //  - Horizontal zoom (px per beat) and snap-to-sixteenth toggle.
 // Edits mutate the shared Session directly and emit edited() exactly once per
 // committed gesture so the main window can push an undo snapshot.
@@ -82,6 +101,8 @@ public:
   bool snap() const { return snap_; }
   // Snaps the selection (or all notes) to the grid; one undo snapshot.
   void quantize();
+  // Mirror the session's persisted loop region into the ruler.
+  void setLoop(bool on, double startBeats, double endBeats);
 
   // Ruler/keyboard/canvas geometry shared with the drawing code.
   static constexpr int kKeyWidth = 60;

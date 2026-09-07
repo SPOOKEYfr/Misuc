@@ -171,6 +171,12 @@ gestures emit `PianoRoll::audition(freq, velocity)` (add / drag / click),
   and `Ctrl+D` duplicates it; each paste commits one undo snapshot and selects
   the pasted notes. A `Quantize` button (or `Q`) snaps the selection — or all
   notes when none are selected — to the 1/16 grid in one undo step.
+- **Transport** (Phase 8): a `LOOP` control (`ControlKind::Loop`,
+  `AudioEngine::setLoop`) carries enabled + start/end beats onto the audio
+  thread, which maps them to transport frames and drives the existing
+  `Transport::advance()` loop wrap. The region is persisted in the Session and
+  surfaced on the piano-roll ruler (green shaded region, drag to redraw) and a
+  transport-bar `LOOP` toggle.
 - **Audio Settings** page drives the live engine: it lists devices (output and
   input) from `PipeWireBackend::enumerateDevices`, offers sample-rate/buffer
   choices, shows latency, toggles the 440 Hz test tone and the groove beat,

@@ -58,6 +58,23 @@ TEST_CASE(session_roundtrip) {
   TEST_ASSERT(loaded.sampleRate() == 44100);
 }
 
+TEST_CASE(session_loop_roundtrip) {
+  Session s;
+  s.setLoop(true, 8.0, 16.0);
+  const Session loaded = Session::fromJson(s.toJson());
+  TEST_ASSERT(loaded.loopMode());
+  TEST_ASSERT(loaded.loopStart() == 8.0);
+  TEST_ASSERT(loaded.loopEnd() == 16.0);
+}
+
+TEST_CASE(session_loop_disabled_overrides_range) {
+  Session s;
+  s.setLoop(true, 2.0, 8.0);
+  s.setLoop(false, 2.0, 8.0); // disabling with equal bounds clears the flag
+  TEST_ASSERT(!s.loopMode());
+  TEST_ASSERT(Session::fromJson(s.toJson()).loopEnd() == 8.0);
+}
+
 TEST_CASE(session_schema_version) {
   const Session s;
   const Json doc = Json::parse(s.toJson());

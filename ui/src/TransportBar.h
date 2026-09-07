@@ -17,11 +17,13 @@ public:
   explicit TransportBar(misuc::engine::AudioEngine& engine, QWidget* parent = nullptr);
 
   void setCountInOn(bool on);
+  void setLoopOn(bool on);
   void refresh(); // pull playhead + tempo state
 
 signals:
   void tempoChanged(double bpm);
   void countInToggled(bool on);
+  void loopToggled(bool on);
 
 protected:
   void paintEvent(QPaintEvent* event) override;
@@ -33,6 +35,7 @@ private:
   misuc::engine::AudioEngine& engine_;
   bool playing_ = false;
   bool countIn_ = true;
+  bool loopOn_ = false;
   uint64_t playhead_ = 0;
   double tempo_ = 120.0;
   int tsNum_ = 4;
@@ -41,6 +44,7 @@ private:
   QRectF playBtn_;
   QRectF stopBtn_;
   QRectF clickBtn_;
+  QRectF loopBtn_;
   QRectF displayRect_;
 };
 

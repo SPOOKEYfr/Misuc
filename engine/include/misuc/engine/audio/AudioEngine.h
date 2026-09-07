@@ -49,6 +49,8 @@ public:
   void setTestTone(bool on);
   void setMasterGainDb(float db);
   void setMonitorGainDb(float db);
+  // Loop region in beats (applied on the audio thread as transport frames).
+  void setLoop(bool enabled, double startBeats, double endBeats);
 
   // Publish a fresh MIDI playback score from any non-RT thread (e.g. when the
   // user edits notes). Handed to the audio thread via a real-time-safe

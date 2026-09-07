@@ -59,6 +59,9 @@ private:
 //  - Left-drag on empty space rubber-bands a selection; all selected notes
 //    move together when any one is dragged, and Del/Backspace deletes them all
 //    as a single undo step.
+//  - Ctrl+C copies the selection, Ctrl+V pastes it (at the playhead when one is
+//    shown, else one grid step to the right of the copy origin), and Ctrl+D
+//    duplicates it right next to itself — each paste is one undo snapshot.
 //  - Horizontal zoom (px per beat) and snap-to-sixteenth toggle.
 // Edits mutate the shared Session directly and emit edited() exactly once per
 // committed gesture so the main window can push an undo snapshot.

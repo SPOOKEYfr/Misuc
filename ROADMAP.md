@@ -202,6 +202,21 @@ be refined as development proceeds.
   neither the outsider note's time nor the group's velocities, with exactly one
   commit; group Del removes both selected notes in one commit.
 
+## Phase 8 — Copy / paste / duplicate (done)
+
+- `Ctrl+C` copies the selection (starts stored relative to the selection's
+  earliest note); `Ctrl+V` inserts the copies selected, anchored at the visible
+  playhead when one is shown, otherwise one grid step to the right of the copy
+  origin; `Ctrl+D` duplicates the selection one step right of itself.
+- Copying never auditions or commits; each paste/duplicate inserts the whole
+  clipboard under a single undo snapshot and leaves the new notes selected
+  (ready to move as a group). Pitches, velocities, and durations are
+  preserved exactly.
+- No engine or session changes. UI harness (96 checks, +26): the two-note copy
+  pastes with relative spacing intact at 1.25/5.25 (step-anchored), duplicates
+  at 1.5/5.5, and a second paste anchors at a visible playhead (7.0/11.0), with
+  exactly one commit per paste and pitch/velocity/duration preserved throughout.
+
 ## Phase 8+ — Beyond
 
 - VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU

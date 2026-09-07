@@ -288,6 +288,62 @@ public:
     update();
   }
 
+  struct ClipNote {
+    double relStart;
+    int pitch;
+    int velocity;
+    double dur;
+  };
+
+  void copySelection() {
+    Track* t = trackEdit();
+    if (!t)
+      return;
+    std::vector<int> all;
+    if (selected_ >= 0)
+      all.push_back(selected_);
+    for (const int i : selectSet_)
+      if (i != selected_)
+        all.push_back(i);
+    if (all.empty())
+      return;
+    std::sort(all.begin(), all.end());
+    const double minStart = t->notes[all.front()].startBeats;
+    clipboard_.clear();
+    for (const int i : all) {
+      const NoteEvent& n = t->notes[i];
+      clipboard_.push_back(
+          {n.startBeats - minStart, n.pitch, n.velocity, n.durationBeats});
+    }
+    clipAnchor_ = minStart;
+  }
+
+  // Inserts clipboard copies anchored at `base`, selects them, and commits
+  // exactly one undo snapshot for the whole paste.
+  void insertPasted(double base) {
+    Track* t = trackEdit();
+    if (!t || clipboard_.empty())
+      return;
+    std::vector<int> added;
+    for (const ClipNote& c : clipboard_) {
+      NoteEvent n;
+      n.pitch = static_cast<uint8_t>(c.pitch);
+      n.velocity = static_cast<uint8_t>(c.velocity);
+      n.durationBeats = c.dur;
+      n.startBeats =
+          std::clamp(base + c.relStart, 0.0, PianoRoll::kHorizonBeats);
+      t->notes.push_back(n);
+      added.push_back(static_cast<int>(t->notes.size()) - 1);
+    }
+    selected_ = added.back();
+    selectSet_.clear();
+    for (const int i : added)
+      if (i != selected_)
+        selectSet_.push_back(i);
+    update();
+    owner_->commit();
+  }
+
   struct DragSnap {
     int index;
     double start;
@@ -300,6 +356,8 @@ public:
   bool multimove_ = false; // dragging a whole multi-selection
   std::vector<DragSnap> groupSnap_;
   std::vector<int> selectSet_;
+  std::vector<ClipNote> clipboard_;
+  double clipAnchor_ = -1.0;
   int selected_ = -1;
   bool dragging_ = false;
   bool dragged_ = false;
@@ -595,6 +653,30 @@ protected:
       if (!doomed.empty()) {
         deleteNotes(doomed);
         owner_->commit();
+        e->accept();
+        return;
+      }
+    }
+    if (e->modifiers().testFlag(Qt::ControlModifier)) {
+      const int k = e->key();
+      if (k == Qt::Key_C) {
+        copySelection();
+        e->accept();
+        return;
+      }
+      if (k == Qt::Key_D) {
+        copySelection();
+        if (!clipboard_.empty())
+          insertPasted(clipAnchor_ + kSnapBeats);
+        e->accept();
+        return;
+      }
+      if (k == Qt::Key_V) {
+        const double base =
+            (playheadVisible_ && playheadBeats_ >= 0.0)
+                ? snapped(playheadBeats_)
+                : clipAnchor_ + kSnapBeats;
+        insertPasted(base);
         e->accept();
         return;
       }

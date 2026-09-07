@@ -148,6 +148,26 @@ be refined as development proceeds.
   54003 checks, 0 failures. Offscreen UI harness verifies the caret render and
   audition signals (37 checks).
 
+## Phase 8 — Note velocity editing (done)
+
+- Each note in the piano roll draws a small velocity bar at its left edge whose
+  height is proportional to the note's velocity; the note's fill opacity also
+  tracks it.
+- Scrolling the wheel over an existing note adjusts its velocity (one notch ≈
+  5), auditioning the note at the new velocity in real time; the change is
+  committed to the undo stack once the scroll gesture settles (280 ms debounce)
+  so a single burst produces exactly one snapshot.
+- Velocity is bounded to 1..127 and already flows into playback gain and
+  audition gain. No engine or session changes were needed.
+- UI harness (46 checks): wheel-down floors velocity at 1, wheel-up ceilings at
+  127, audition reports the updated velocity, a debounced `edited()` fires, and
+  the velocity bar grows measurably in the rendered pixels (27 bar pixels at
+  max vs 0 at min).
+- The harness no longer links Qt6Test: that library crashes this Qt 6.4.2 stack
+  at `QApplication` construction (a Qt bug), so event synthesis and signal
+  spies are hand-rolled and the test pins `-fPIC` to match the UI objects.
+  Full engine suite unchanged: 54003 checks, 0 failures.
+
 ## Phase 8+ — Beyond
 
 - VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU

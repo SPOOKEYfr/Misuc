@@ -9,6 +9,7 @@
 #include <QPainter>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
@@ -25,6 +26,8 @@ namespace {
 
 constexpr double kSnapBeats = 0.25; // 1/16 note
 constexpr int kHighPitch = PianoRoll::kLowPitch + PianoRoll::kRowCount - 1;
+constexpr int kVelocityStep = 127 / 25; // one wheel notch
+constexpr int kVelocityCommitMs = 280;  // undo-snapshot debounce
 
 int pitchRowY(int pitch, int rowH) { return (kHighPitch - pitch) * rowH; }
 
@@ -176,6 +179,10 @@ public:
     setFixedSize(
         static_cast<int>(PianoRoll::kHorizonBeats * owner_->pxPerBeat_) + 1,
         PianoRoll::kRowCount * PianoRoll::kRowH + 1);
+    // Wheel velocity edits are committed once the gesture settles so a single
+    // scroll burst produces exactly one undo snapshot.
+    velocityTimer_.setSingleShot(true);
+    connect(&velocityTimer_, &QTimer::timeout, this, [this] { owner_->commit(); });
   }
 
   QSize sizeHint() const override { return size(); }
@@ -255,6 +262,7 @@ public:
   int grabPitch_ = 0;
   double playheadBeats_ = -1.0;
   bool playheadVisible_ = false;
+  QTimer velocityTimer_;
 
 protected:
   void paintEvent(QPaintEvent*) override {
@@ -300,6 +308,15 @@ protected:
                                                      : theme::kBorderBright,
                     1));
       p.drawRoundedRect(r.adjusted(0, 0, -1, -1), 2, 2);
+      // Velocity bar: vertical bar growing from the note floor, height
+      // proportional to how hard the note is struck.
+      const double vh =
+          (static_cast<double>(n.velocity) / 127.0) * (owner_->kRowH - 8);
+      p.setPen(Qt::NoPen);
+      p.setBrush(theme::kOk);
+      p.drawRect(
+          QRectF(r.left() + 3.0, r.bottom() - 1.0 - vh, 3.0, vh));
+      p.setBrush(fill);
     }
 
     // Playhead caret, drawn above the notes so it stays visible.
@@ -407,6 +424,31 @@ protected:
       owner_->setZoom(owner_->pxPerBeat_ * factor);
       e->accept();
       return;
+    }
+    // Wheel over an existing note changes its velocity (audible immediately,
+    // committed once the gesture settles); wheel elsewhere scrolls.
+    if (!e->modifiers().testFlag(Qt::AltModifier)) {
+      const int hit = hitTest(e->position());
+      if (hit >= 0) {
+        Track* t = trackEdit();
+        if (t && hit >= 0 && hit < static_cast<int>(t->notes.size())) {
+          NoteEvent& n = t->notes[hit];
+          const int delta = e->angleDelta().y();
+          if (delta != 0) {
+            const int step = delta > 0 ? kVelocityStep : -kVelocityStep;
+            n.velocity = static_cast<uint8_t>(std::clamp(
+                static_cast<int>(n.velocity) + step, 1, 127));
+            selected_ = hit;
+            owner_->audition(
+                misuc::dsp::midiNoteToFreq(static_cast<double>(n.pitch)),
+                n.velocity / 127.0f);
+            velocityTimer_.start(kVelocityCommitMs);
+            update();
+          }
+          e->accept();
+          return;
+        }
+      }
     }
     QWidget::wheelEvent(e);
   }

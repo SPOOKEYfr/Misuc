@@ -52,6 +52,9 @@ private:
 //  - Left-click a note and drag to move it (time + pitch).
 //  - Left-double-click empty space adds a note (snapped); double-clicking a
 //    note deletes it; right-click deletes; Del removes the selection.
+//  - Wheel over a note adjusts its velocity (auditioned live, committed once
+//    the scroll gesture settles); Ctrl+wheel zooms.
+//  - Each note draws a velocity bar (height proportional to velocity).
 //  - Horizontal zoom (px per beat) and snap-to-sixteenth toggle.
 // Edits mutate the shared Session directly and emit edited() exactly once per
 // committed gesture so the main window can push an undo snapshot.

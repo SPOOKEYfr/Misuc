@@ -152,9 +152,14 @@ bar, sidebars, status area, and content pages.
 - **Editor** page (Phase 7): the main window's 30 Hz `poll()` feeds the
   transport playhead (frames → beats via tempo) to the piano roll, which draws
   a green caret on ruler + canvas and auto-follows it while playing. Note
-  gestures emit `PianoRoll::audition(freq, velocity)` (add / drag / click),
-  forwarded to `AudioEngine::previewNote` so notes make sound immediately —
-  even while the transport is stopped.
+gestures emit `PianoRoll::audition(freq, velocity)` (add / drag / click),
+   forwarded to `AudioEngine::previewNote` so notes make sound immediately —
+   even while the transport is stopped.
+- **Editor** page (Phase 8): scrolling the wheel over an existing note edits
+  its velocity (auditioned live at the new gain, committed via `edited()` after
+  a 280 ms debounce so one scroll burst = one undo snapshot); each note draws a
+  vertical velocity bar at its left edge, and its fill opacity rises with
+  velocity.
 - **Audio Settings** page drives the live engine: it lists devices (output and
   input) from `PipeWireBackend::enumerateDevices`, offers sample-rate/buffer
   choices, shows latency, toggles the 440 Hz test tone and the groove beat,

@@ -176,6 +176,30 @@ void ThemeEngine::pushToTokens() const {
   theme::kGlass = pal_.glass;
   theme::kGlassBorder = pal_.glassBorder;
   theme::kGlassHighlight = pal_.glassHighlight;
+
+  // Phase 1 layered charcoal-glass surface system. The editor-neutral tokens
+  // (playhead / loop / clip / grid / meters) deliberately stay at their stock
+  // values so note edits and clips read identically in every theme.
+  theme::kBackgroundSecondary = blend(pal_.background, pal_.panel, 90);
+  theme::kSurface = pal_.panel;
+  theme::kSurfaceElevated = pal_.panelRaised;
+  theme::kSurfaceGlassStrong = QColor(pal_.glass);
+  theme::kSurfaceGlassStrong.setAlpha(235);
+  theme::kBorderSubtle = QColor(pal_.border);
+  theme::kBorderSubtle.setAlpha(150);
+  theme::kTextSecondary = blend(pal_.text, pal_.textDim, 92);
+  theme::kTextMuted = pal_.textFaint;
+  theme::kTextDisabled = blend(pal_.textFaint, pal_.background, 130);
+  theme::kAccentHover = pal_.accent.lighter(114);
+  theme::kSelection = pal_.accentSoft;
+  theme::kPanelHeader = pal_.panel.darker(112);
+  theme::kToolbar = pal_.background;
+  theme::kTransport = pal_.background;
+  theme::kHintBar = pal_.background;
+  theme::kTooltipBg = pal_.panelRaised;
+  theme::kButton = pal_.panelRaised;
+  theme::kButtonHover = blend(pal_.panelRaised, pal_.accent, 70);
+  theme::kButtonPressed = pal_.panelSunken;
 }
 
 QString ThemeEngine::buildStyleSheet() const {
@@ -187,16 +211,22 @@ QString ThemeEngine::buildStyleSheet() const {
   const QString panel = theme::kPanel.name();
   const QString accent = theme::kAccent.name();
   const QString sunken = theme::kPanelSunken.name();
+  const QString btnHover = theme::kButtonHover.name();
+  const QString btnPressed = theme::kButtonPressed.name();
+  const QString toolbar = theme::kToolbar.name();
+  const QString panelHeader = theme::kPanelHeader.name();
+  const QString textSecondary = theme::kTextSecondary.name();
+  const QString textMuted = theme::kTextMuted.name();
 
   return QStringLiteral(R"(
-    QWidget { color: %1; }
+    QWidget { color: %1; font-size: 13px; }
     QMainWindow, QWidget#central { background-color: %2; }
     QPushButton {
       background-color: %4; color: %1; border: 1px solid %5;
       border-radius: 6px; padding: 8px 16px; font-weight: 500;
     }
-    QPushButton:hover { background-color: #243041; }
-    QPushButton:pressed { background-color: #10151e; }
+    QPushButton:hover { background-color: %9; }
+    QPushButton:pressed { background-color: %10; }
     QPushButton:disabled { color: %3; border-color: %5; }
     QPushButton#navButton {
       text-align: left; padding: 10px 12px; color: %3;
@@ -205,10 +235,11 @@ QString ThemeEngine::buildStyleSheet() const {
     QPushButton#navButton:checked {
       background-color: %6; color: %1; border: none;
     }
-    QLineEdit {
+    QLineEdit, QSpinBox, QDoubleSpinBox {
       background-color: %8; color: %1; border: 1px solid %5;
       border-radius: 6px; padding: 6px 10px; selection-background-color: %7;
     }
+    QDoubleSpinBox { padding-right: 4px; }
     QComboBox {
       background-color: %8; color: %1; border: 1px solid %5;
       border-radius: 6px; padding: 6px 10px;
@@ -233,6 +264,35 @@ QString ThemeEngine::buildStyleSheet() const {
       background-color: %4; color: %1; border: 1px solid %5;
       padding: 4px 8px;
     }
+    /* Global header strip + dock chrome (charcoal glass). */
+    QToolBar {
+      background: %11; border: none; border-bottom: 1px solid %5;
+      spacing: 4px;
+    }
+    QToolBar::handle { background: transparent; }
+    QDockWidget { color: %1; titlebar-close-icon: none; }
+    QDockWidget::title {
+      background: %12; color: %13; padding: 5px 10px;
+      border-bottom: 1px solid %5; font-weight: 600;
+    }
+    QDockWidget::close-button, QDockWidget::float-button {
+      background: transparent; border: none; padding: 2px;
+    }
+    QDockWidget::close-button:hover, QDockWidget::float-button:hover {
+      background: %9; border-radius: 3px;
+    }
+    QTabWidget::pane { border: 1px solid %5; }
+    QTabBar::tab {
+      background: %2; color: %3; padding: 6px 16px;
+      border: 1px solid %5; border-bottom: none; border-top-left-radius: 6px;
+      border-top-right-radius: 6px; margin-right: 2px; font-weight: 500;
+    }
+    QTabBar::tab:selected {
+      background: %4; color: %1; border-top: 2px solid %7;
+    }
+    QTabBar::tab:hover:!selected { background: %4; color: %13; }
+    QStatusBar { background: %2; color: %14; }
+    QStatusBar::item { border: none; }
     QMenuBar { background: %2; color: %1; padding: 2px 6px; }
     QMenuBar::item { background: transparent; padding: 6px 12px; border-radius: 6px; }
     QMenuBar::item:selected { background: %6; }
@@ -266,7 +326,8 @@ QString ThemeEngine::buildStyleSheet() const {
     QListWidget::item:selected { background-color: %6; color: %1; }
     QListWidget::item:hover { background-color: %4; }
   )")
-      .arg(t, bg, dim, raised, border, panel, accent, sunken);
+      .arg(t, bg, dim, raised, border, panel, accent, sunken, btnHover,
+           btnPressed, toolbar, panelHeader, textSecondary, textMuted);
 }
 
 QString ThemeEngine::glassPanelStyle(bool glassLine) const {

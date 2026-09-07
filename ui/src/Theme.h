@@ -39,8 +39,61 @@ inline QColor kGlass(0x22, 0x2e, 0x40, 200);
 inline QColor kGlassBorder(0x88, 0x9a, 0xb5, 70);
 inline QColor kGlassHighlight(0xff, 0xff, 0xff, 26);
 
+// --------------------------------------------------------------------------
+// Phase 1 semantic tokens (charcoal-black glass design system). Every widget
+// must reference these; literals are not allowed in screens. The values below
+// are the "Misuc Graphite" stock palette; ThemeEngine overwrites the
+// theme-driven subset on every apply so a preset/accent switch re-colors the
+// whole app. The editor-neutral tokens (playhead, loop, clip, grid, meters)
+// keep fixed stock values so compositions stay readable in any theme.
+// --------------------------------------------------------------------------
+
+// Surfaces: layered charcoal workspace with elevated/glass panels on top.
+inline QColor kBackgroundSecondary("#0e131c");
+inline QColor kSurface("#151c27");           // == kPanel
+inline QColor kSurfaceElevated("#1c2531");   // == kPanelRaised
+inline QColor kSurfaceGlassStrong(0x2a, 0x34, 0x46, 235);
+inline QColor kBorderSubtle(0x20, 0x29, 0x3a, 150);
+
+// Text hierarchy.
+inline QColor kTextSecondary("#a9b4c5");
+inline QColor kTextMuted("#5b6472");         // == kTextFaint
+inline QColor kTextDisabled("#3d4450");
+
+// Interactive accents.
+inline QColor kAccentHover("#ff815f");
+inline QColor kSelection("#3a2420");         // == kAccentSoft
+
+// Chrome surfaces (header / dock titles / transport / hint bar).
+inline QColor kPanelHeader("#161c27");
+inline QColor kToolbar("#0c1017");
+inline QColor kTransport("#0d121b");
+inline QColor kHintBar("#0d121b");
+inline QColor kTooltipBg("#1c2531");
+inline QColor kButton("#1d2531");
+inline QColor kButtonHover("#283245");
+inline QColor kButtonPressed("#141a24");
+
+// Editor + meters (fixed stock values so pixel tests and readability hold).
+inline QColor kGridRow("#232c3b");
+inline QColor kPlayhead("#4ade80");
+inline QColor kLoopRegion("#4ade80");
+inline QColor kClipBody("#1d3347");
+inline QColor kClipWave("#6fb5de");
+inline QColor kMarquee("#9ca3af");
+inline QColor kMeterNormal("#4ade80");
+inline QColor kMeterHot("#ffb454");
+inline QColor kMeterClip("#ff5c5c");
+
 QFont uiFont(int pointSize = 10, QFont::Weight weight = QFont::Normal);
 QFont monoFont(int pointSize = 10);
+
+// Returns a copy of `color` with the requested alpha (Qt 6.4 has no
+// QColor::withAlpha yet).
+inline QColor withAlpha(QColor color, int alpha) {
+  color.setAlpha(alpha);
+  return color;
+}
 
 } // namespace theme
 

@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Misuc
+GenericName=Music Production
+Comment=Multi-track MIDI sequencer and audio editor for Linux
+Exec=misuc_app
+TryExec=misuc_app
+Icon=misuc
+Terminal=false
+Categories=AudioVideo;Audio;Music;AudioVideoEditing;
+Keywords=MIDI;sequencer;DAW;music;production;audio;
+StartupNotify=true
+SingleMainWindow=true

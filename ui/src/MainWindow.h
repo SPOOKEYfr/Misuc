@@ -11,6 +11,7 @@ class QStackedWidget;
 class QTimer;
 class QMenu;
 class QAction;
+class QLabel;
 
 namespace misuc::engine {
 class AudioEngine;
@@ -52,6 +53,8 @@ private:
   void poll();
   void feedPlayhead();
   void onSessionEdited();
+  // Repaint the nav-rail brand mark from the current theme accent.
+  void applyBranding();
 
   void newProject();
   void openDialog();
@@ -91,6 +94,7 @@ private:
   ThemePage* themePage_ = nullptr;
   QTimer* timer_ = nullptr;
   QWidget* navRail_ = nullptr;
+  QLabel* navLogo_ = nullptr;
 
   // Headless/testing hook: when set, exportAudio() skips the save dialog and
   // renders directly to this path.

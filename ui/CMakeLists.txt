@@ -7,6 +7,7 @@ add_executable(misuc_app
   src/Theme.cpp
   src/theme/ThemeEngine.cpp
   src/theme/ThemePage.cpp
+  src/branding/Logo.cpp
   src/MainWindow.cpp
   src/TransportBar.cpp
   src/MeterWidget.cpp
@@ -21,6 +22,10 @@ add_executable(misuc_app
   src/mixer/ChannelStrip.cpp
   src/mixer/MixerPage.cpp)
 
+qt_add_resources(misuc_app MISUC_ASSETS
+  PREFIX "/"
+  ${CMAKE_CURRENT_SOURCE_DIR}/resources.qrc)
+
 target_include_directories(misuc_app PRIVATE src)
 
 target_link_libraries(misuc_app PRIVATE
@@ -30,3 +35,18 @@ target_link_libraries(misuc_app PRIVATE
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   target_compile_definitions(misuc_app PRIVATE MISUC_DEBUG)
 endif()
+
+# ---------------------------------------------------------------------------
+# Linux desktop integration: install the app, a real .desktop entry, and the
+# hicolor icon set rendered from branding/Logo.cpp by tools/rendericons.
+# ---------------------------------------------------------------------------
+install(TARGETS misuc_app RUNTIME DESTINATION bin)
+
+install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../assets/desktop/misuc.desktop
+        DESTINATION share/applications)
+
+foreach(SIZE 16 22 24 32 48 64 128 256)
+  install(FILES
+      ${CMAKE_CURRENT_SOURCE_DIR}/../assets/hicolor/${SIZE}x${SIZE}/apps/misuc.png
+      DESTINATION share/icons/hicolor/${SIZE}x${SIZE}/apps)
+endforeach()

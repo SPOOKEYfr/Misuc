@@ -35,7 +35,9 @@
 #include "Theme.h"
 #include "TransportBar.h"
 #include "PianoRoll.h"
+#include "branding/Logo.h"
 #include "mixer/MixerPage.h"
+#include "theme/ThemeEngine.h"
 #include "theme/ThemePage.h"
 
 namespace misuc::ui {
@@ -80,6 +82,15 @@ MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
   auto* navLay = new QVBoxLayout(navRail_);
   navLay->setContentsMargins(10, 18, 10, 18);
   navLay->setSpacing(4);
+
+  // Brand mark: the note-flame logo painted live from the theme accent.
+  navLogo_ = new QLabel(navRail_);
+  navLogo_->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
+  navLogo_->setFixedHeight(64);
+  navLay->addWidget(navLogo_);
+  applyBranding();
+  connect(&ThemeEngine::instance(), &ThemeEngine::themeChanged, this,
+          [this] { applyBranding(); });
 
   auto* navGroup = new QButtonGroup(this);
   navGroup->setExclusive(true);
@@ -407,6 +418,14 @@ void MainWindow::feedPlayhead() {
 void MainWindow::paintEvent(QPaintEvent*) {
   QPainter p(this);
   p.fillRect(rect(), theme::kBackground);
+}
+
+void MainWindow::applyBranding() {
+  if (!navLogo_)
+    return;
+  const QPixmap pm = logoPixmap(56, theme::kAccent, theme::kAccentSoft);
+  navLogo_->setPixmap(pm.scaled(56, 56, Qt::KeepAspectRatio,
+                                Qt::SmoothTransformation));
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {

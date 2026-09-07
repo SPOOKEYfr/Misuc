@@ -10,7 +10,9 @@ add_executable(misuc_app
   src/MeterWidget.cpp
   src/AudioSettingsPage.cpp
   src/ProjectPage.cpp
-  src/StatusPanel.cpp)
+  src/StatusPanel.cpp
+  src/PianoRoll.cpp
+  src/EditorPage.cpp)
 
 target_include_directories(misuc_app PRIVATE src)
 

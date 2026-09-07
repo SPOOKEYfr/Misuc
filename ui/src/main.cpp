@@ -91,6 +91,35 @@ int main(int argc, char** argv) {
     QMenu::item:selected { background-color: %7; color: black; }
     QMenu::item:disabled { color: %3; }
     QMenu::separator { height: 1px; background: %5; margin: 6px 8px; }
+    QPushButton#smallButton {
+      padding: 5px 12px; font-weight: 500;
+    }
+    QScrollArea { background: %8; border: none; }
+    QScrollBar:vertical {
+      background: %2; width: 10px; margin: 0;
+    }
+    QScrollBar::handle:vertical {
+      background: %6; min-height: 24px; border-radius: 5px;
+    }
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+    QScrollBar:horizontal {
+      background: %2; height: 10px; margin: 0;
+    }
+    QScrollBar::handle:horizontal {
+      background: %6; min-width: 24px; border-radius: 5px;
+    }
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+    QCheckBox { color: %1; spacing: 8px; }
+    QCheckBox::indicator {
+      width: 16px; height: 16px; border: 1px solid %5;
+      border-radius: 4px; background: %8;
+    }
+    QCheckBox::indicator:checked { background: %7; border-color: %7; }
+    QListWidget::item { color: %1; border-radius: 6px; margin: 2px; }
+    QListWidget::item:selected {
+      background-color: %6; color: %1;
+    }
+    QListWidget::item:hover { background-color: %4; }
   )")
       .arg(misuc::ui::theme::kText.name())
       .arg(misuc::ui::theme::kBackground.name())

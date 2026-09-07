@@ -87,6 +87,24 @@ be refined as development proceeds.
 - Arrangement/mixer themes, piano roll rendering, timeline, MIDI note entry.
 - Undo/redo for editing, snap settings, zoom.
 
+## Phase 5 — Core UI/peripherals (done)
+
+- Session model extended to v2: `NoteEvent` (channel, pitch, velocity,
+  start/duration in beats) and `Track` (id, name, muted, gainDb, notes), both
+  serialized to JSON with v1 backward compatibility.
+- Editor page: track list with Add/Remove + per-track mute, zoom slider
+  (10–160 px/beat), snap 1/16 toggle, and a piano-roll editor bound to the
+  selected track of the shared Session.
+- Piano roll: ruler + piano-key column + scrollable note grid (61 pitches,
+  C1..C6, 64-beat horizon); double-click empty adds a snapped note, drag moves
+  it (time + pitch), right-click/Del deletes, Ctrl+wheel zooms.
+- Every edit (`edited()`) lands on the shared undo stack — the same
+  snapshot-based UndoStack from Phase 4 — so all piano-roll gestures and track
+  changes are undoable from the Edit menu.
+- Verified headless with synthetic events: 22 behavioral assertions covering
+  add/drag/delete/snap/zoom/track-lifecycle/mute all pass; full suite green at
+  49944 checks, 0 failures.
+
 ## Phase 6+ — Beyond
 
 - VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU

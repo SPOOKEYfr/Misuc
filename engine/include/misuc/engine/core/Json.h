@@ -58,7 +58,8 @@ public:
 
   static Json parse(const std::string& text);
 
-  static constexpr int kSchemaVersion = 1;
+  // Current .misuc schema version (v2 adds tracks + MIDI notes).
+  static constexpr int kSchemaVersion = 2;
 
 private:
   void write(std::string& out) const;

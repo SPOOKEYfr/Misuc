@@ -114,9 +114,11 @@ this queue at the top of each audio callback and applies changes.
 ### project
 
 - `Session.{h,cpp}` — the `.misuc` project foundation as JSON
-  (`kSchemaVersion = 1`): schemaVersion, app identity, metadata, transport.
-  Owned by the main window; persisted through the File menu and edited on the
-  Project page.
+  (`kSchemaVersion = 2`): schemaVersion, app identity, metadata, transport,
+  tempo, and tracks. A track carries id/name/mute/gain and a list of
+  `NoteEvent`s (pitch, velocity, start/duration in beats). Version-1 documents
+  (no tracks) still load. Owned by the main window; persisted through the File
+  menu and edited on the Project page and the Editor page.
 
 ## UI (`ui/`)
 
@@ -131,6 +133,12 @@ bar, sidebars, status area, and content pages.
   Cancel guard on New / Open / Quit.
 - **Edit menu**: Undo / Redo (`Ctrl+Z` / `Ctrl+Shift+Z`) over snapshots of the
   session.
+- **Editor** page: track list (add / remove / mute) plus a custom-painted
+  piano-roll editor bound to the selected track of the shared `Session`.
+  Ruler, piano-key column, and note grid are separate widgets; edits
+  (double-click adds, drag moves, right-click / Del deletes, Ctrl+wheel zooms,
+  snap 1/16 toggle) mutate the session directly and emit `edited()` so the
+  main window pushes one undo snapshot per gesture.
 - **Audio Settings** page drives the live engine: it lists devices (output and
   input) from `PipeWireBackend::enumerateDevices`, offers sample-rate/buffer
   choices, shows latency, toggles the 440 Hz test tone and the groove beat,

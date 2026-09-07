@@ -21,6 +21,7 @@
 #include <misuc/engine/audio/AudioEngine.h>
 
 #include "AudioSettingsPage.h"
+#include "EditorPage.h"
 #include "ProjectPage.h"
 #include "StatusPanel.h"
 #include "Theme.h"
@@ -76,7 +77,8 @@ MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
   };
 
   addNav(QStringLiteral("Project"), 0);
-  addNav(QStringLiteral("Audio"), 1);
+  addNav(QStringLiteral("Editor"), 1);
+  addNav(QStringLiteral("Audio"), 2);
   navLay->addStretch();
 
   midLay->addWidget(navRail_);
@@ -142,17 +144,24 @@ void MainWindow::buildMenus() {
 
 void MainWindow::buildPages() {
   projectPage_ = new ProjectPage(session_, this);
+  editorPage_ = new EditorPage(session_, this);
   pages_->addWidget(projectPage_);
+  pages_->addWidget(editorPage_);
   pages_->addWidget(new AudioSettingsPage(engine_, this));
 
-  connect(projectPage_, &ProjectPage::edited, this, [this] {
-    undo_.push(session_);
-    dirty_ = true;
-    applyTempoToEngine();
-    undoCmd_->setEnabled(undo_.canUndo());
-    redoCmd_->setEnabled(undo_.canRedo());
-    updateWindowTitle();
-  });
+  connect(projectPage_, &ProjectPage::edited, this,
+          &MainWindow::onSessionEdited);
+  connect(editorPage_, &EditorPage::edited, this,
+          &MainWindow::onSessionEdited);
+}
+
+void MainWindow::onSessionEdited() {
+  undo_.push(session_);
+  dirty_ = true;
+  applyTempoToEngine();
+  undoCmd_->setEnabled(undo_.canUndo());
+  redoCmd_->setEnabled(undo_.canRedo());
+  updateWindowTitle();
 }
 
 void MainWindow::poll() {
@@ -182,6 +191,7 @@ void MainWindow::newProject() {
   undo_.clear();
   undo_.push(session_);
   projectPage_->refresh();
+  editorPage_->refresh();
   applyTempoToEngine();
   undoCmd_->setEnabled(false);
   redoCmd_->setEnabled(false);
@@ -217,6 +227,7 @@ void MainWindow::openProject(const QString& path) {
   undo_.clear();
   undo_.push(session_);
   projectPage_->refresh();
+  editorPage_->refresh();
   applyTempoToEngine();
   undoCmd_->setEnabled(false);
   redoCmd_->setEnabled(false);
@@ -256,6 +267,7 @@ void MainWindow::performUndo() {
     return;
   session_ = undo_.state();
   projectPage_->refresh();
+  editorPage_->refresh();
   applyTempoToEngine();
   dirty_ = true;
   undoCmd_->setEnabled(undo_.canUndo());
@@ -268,6 +280,7 @@ void MainWindow::performRedo() {
     return;
   session_ = undo_.state();
   projectPage_->refresh();
+  editorPage_->refresh();
   applyTempoToEngine();
   dirty_ = true;
   undoCmd_->setEnabled(undo_.canUndo());

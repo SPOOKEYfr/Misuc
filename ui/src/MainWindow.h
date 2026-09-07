@@ -20,6 +20,7 @@ namespace misuc::ui {
 class TransportBar;
 class StatusPanel;
 class ProjectPage;
+class EditorPage;
 
 // Application shell: menu bar (File / Edit), a project document shared between
 // the Project page and the file menu, transport on top, navigation rail, a
@@ -38,6 +39,7 @@ private:
   void buildMenus();
   void buildPages();
   void poll();
+  void onSessionEdited();
 
   void newProject();
   void openDialog();
@@ -63,6 +65,7 @@ private:
   TransportBar* transport_ = nullptr;
   StatusPanel* status_ = nullptr;
   ProjectPage* projectPage_ = nullptr;
+  EditorPage* editorPage_ = nullptr;
   QTimer* timer_ = nullptr;
   QWidget* navRail_ = nullptr;
 

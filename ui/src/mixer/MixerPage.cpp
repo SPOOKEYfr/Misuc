@@ -113,7 +113,7 @@ void MixerPage::rebuildStrips() {
 
   // Master bus strip (no pan/mute/solo — a true stereo master).
   auto* master = new QWidget(stripsHost_);
-  master->setObjectName(QStringLiteral("channelStrip"));
+  master->setObjectName(QStringLiteral("masterStrip"));
   master->setMinimumWidth(84);
   master->setMaximumWidth(96);
   auto* ml = new QVBoxLayout(master);

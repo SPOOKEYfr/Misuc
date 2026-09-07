@@ -85,6 +85,7 @@ MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
 
   // Brand mark: the note-flame logo painted live from the theme accent.
   navLogo_ = new QLabel(navRail_);
+  navLogo_->setObjectName(QStringLiteral("navLogo"));
   navLogo_->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
   navLogo_->setFixedHeight(64);
   navLay->addWidget(navLogo_);

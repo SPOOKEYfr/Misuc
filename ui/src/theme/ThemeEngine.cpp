@@ -128,6 +128,7 @@ bool ThemeEngine::setPreset(const QString& name) {
   for (const PresetRecord& r : kPresets) {
     if (name == QLatin1String(r.name)) {
       adopt(presetPalette(name));
+      savePersisted();
       return true;
     }
   }

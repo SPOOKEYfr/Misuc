@@ -159,7 +159,7 @@ be refined as development proceeds.
   so a single burst produces exactly one snapshot.
 - Velocity is bounded to 1..127 and already flows into playback gain and
   audition gain. No engine or session changes were needed.
-- UI harness (46 checks): wheel-down floors velocity at 1, wheel-up ceilings at
+- UI harness (57 checks): wheel-down floors velocity at 1, wheel-up ceilings at
   127, audition reports the updated velocity, a debounced `edited()` fires, and
   the velocity bar grows measurably in the rendered pixels (27 bar pixels at
   max vs 0 at min).
@@ -167,6 +167,22 @@ be refined as development proceeds.
   at `QApplication` construction (a Qt bug), so event synthesis and signal
   spies are hand-rolled and the test pins `-fPIC` to match the UI objects.
   Full engine suite unchanged: 54003 checks, 0 failures.
+
+## Phase 8 — Note duration resizing (done)
+
+- Dragging a note's right edge resizes its duration (snapped to 1/16 while snap
+  is on, clamped to a 0.1-beat minimum and to the horizon). A 6 px grip band at
+  the right edge of the note (with a resize cursor on hover) decides between
+  resize and move; a press on the grip still auditions the note.
+- The gesture commits exactly one undo snapshot (`edited()` once) on release,
+  and never touches pitch, time, or velocity.
+- No engine or session changes needed: the score builder already consumes
+  `durationBeats` for note length and ending.
+- UI harness (extended to 57 checks): a grip press resizes 0.5 → 1.0 beats
+  (start, pitch, and velocity untouched), the note body grows past its old
+  right edge in the rendered pixels (221 changed px in the old-empty strip),
+  exactly one commit fires, and dragging the grip past the start clamps the
+  duration to 0.1.
 
 ## Phase 8+ — Beyond
 

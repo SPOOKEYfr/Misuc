@@ -49,7 +49,8 @@ private:
 
 // A real MIDI piano-roll editor bound to one track of a shared Session.
 //  - Top ruler (bars/beats), left piano keyboard, scrollable note grid.
-//  - Left-click a note and drag to move it (time + pitch).
+//  - Left-click a note and drag to move it (time + pitch); drag the note's
+//    right edge to resize its duration (snapped).
 //  - Left-double-click empty space adds a note (snapped); double-clicking a
 //    note deletes it; right-click deletes; Del removes the selection.
 //  - Wheel over a note adjusts its velocity (auditioned live, committed once

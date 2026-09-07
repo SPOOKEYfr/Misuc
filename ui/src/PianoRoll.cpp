@@ -28,6 +28,8 @@ constexpr double kSnapBeats = 0.25; // 1/16 note
 constexpr int kHighPitch = PianoRoll::kLowPitch + PianoRoll::kRowCount - 1;
 constexpr int kVelocityStep = 127 / 25; // one wheel notch
 constexpr int kVelocityCommitMs = 280;  // undo-snapshot debounce
+constexpr double kResizeGrabPx = 6.0;   // right-edge grab band, px
+constexpr double kMinDurationBeats = 0.1;
 
 int pitchRowY(int pitch, int rowH) { return (kHighPitch - pitch) * rowH; }
 
@@ -175,6 +177,7 @@ class PianoRoll::Canvas : public QWidget {
 public:
   explicit Canvas(PianoRoll* owner) : QWidget(owner), owner_(owner) {
     setFocusPolicy(Qt::StrongFocus);
+    setMouseTracking(true);
     setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     setFixedSize(
         static_cast<int>(PianoRoll::kHorizonBeats * owner_->pxPerBeat_) + 1,
@@ -213,10 +216,24 @@ public:
     if (!t)
       return -1;
     for (size_t i = 0; i < t->notes.size(); ++i) {
-      if (noteRect(t->notes[i]).contains(pos))
+      if (noteRect(t->notes[i]).adjusted(0, 2, 0, -2).contains(pos))
         return static_cast<int>(i);
     }
     return -1;
+  }
+
+  // True when a press/click lands in the right-edge grab band of a note.
+  bool onResizeGrip(const QPointF& pos) const {
+    const Track* t = track();
+    if (!t)
+      return false;
+    for (size_t i = 0; i < t->notes.size(); ++i) {
+      const QRectF r = noteRect(t->notes[i]);
+      if (r.adjusted(0, 2, 0, -2).contains(pos) &&
+          pos.x() >= r.right() - kResizeGrabPx)
+        return true;
+    }
+    return false;
   }
 
   QRectF noteRect(const NoteEvent& n) const {
@@ -260,6 +277,9 @@ public:
   int dragOffsetPitch_ = 0;
   double grabBeat_ = 0.0;
   int grabPitch_ = 0;
+  bool resizing_ = false;
+  bool resized_ = false;
+  int resizeIndex_ = -1;
   double playheadBeats_ = -1.0;
   bool playheadVisible_ = false;
   QTimer velocityTimer_;
@@ -270,7 +290,6 @@ protected:
     p.fillRect(rect(), theme::kPanelSunken);
     const Track* t = track();
     const int barBeats = owner_->session_.timeSigNumerator();
-    const double rowH = owner_->kRowH;
 
     // Vertical grid: sixteenths faint, quarters normal, bars strong.
     const int lastBeat = static_cast<int>(PianoRoll::kHorizonBeats);
@@ -333,6 +352,18 @@ protected:
     setFocus();
     const QPointF pos = e->position();
     if (e->button() == Qt::LeftButton) {
+      if (onResizeGrip(pos)) {
+        const int hit = hitTest(pos);
+        selected_ = hit;
+        resizeIndex_ = hit;
+        resizing_ = true;
+        resized_ = false;
+        owner_->audition(misuc::dsp::midiNoteToFreq(
+                             static_cast<double>(track()->notes[hit].pitch)),
+                         track()->notes[hit].velocity / 127.0f);
+        update();
+        return;
+      }
       const int hit = hitTest(pos);
       if (hit >= 0) {
         const Track* t = track();
@@ -365,30 +396,59 @@ protected:
   }
 
   void mouseMoveEvent(QMouseEvent* e) override {
-    if (!dragging_ || !track())
+    if (resizing_) {
+      Track* t = trackEdit();
+      if (t && resizeIndex_ >= 0 &&
+          resizeIndex_ < static_cast<int>(t->notes.size())) {
+        NoteEvent& n = t->notes[resizeIndex_];
+        const double dur = std::clamp(
+            snapped(xToBeat(e->position().x())) - n.startBeats,
+            kMinDurationBeats, PianoRoll::kHorizonBeats - n.startBeats);
+        if (std::fabs(dur - n.durationBeats) > 1e-6) {
+          n.durationBeats = dur;
+          resized_ = true;
+          update();
+        }
+      }
+      e->accept();
       return;
-    Track* t = trackEdit();
-    if (dragIndex_ < 0 || dragIndex_ >= static_cast<int>(t->notes.size()))
-      return;
-    NoteEvent& n = t->notes[dragIndex_];
-    const double beat = xToBeat(e->position().x());
-    const int pitch = yToPitch(e->position().y());
-    const double newStart =
-        std::clamp(snapped(beat - dragOffsetBeats_), 0.0, PianoRoll::kHorizonBeats);
-    const int newPitch = std::clamp(pitch - dragOffsetPitch_, kLowPitch, kHighPitch);
-    if (std::fabs(newStart - n.startBeats) > 1e-6 || newPitch != static_cast<int>(n.pitch)) {
-      n.startBeats = newStart;
-      n.pitch = static_cast<uint8_t>(newPitch);
-      dragged_ = true;
-      owner_->audition(
-          misuc::dsp::midiNoteToFreq(static_cast<double>(n.pitch)),
-          n.velocity / 127.0f);
     }
-    update();
+    if (dragging_) {
+      Track* t = trackEdit();
+      if (dragIndex_ < 0 || dragIndex_ >= static_cast<int>(t->notes.size()))
+        return;
+      NoteEvent& n = t->notes[dragIndex_];
+      const double beat = xToBeat(e->position().x());
+      const int pitch = yToPitch(e->position().y());
+      const double newStart =
+          std::clamp(snapped(beat - dragOffsetBeats_), 0.0, PianoRoll::kHorizonBeats);
+      const int newPitch = std::clamp(pitch - dragOffsetPitch_, kLowPitch, kHighPitch);
+      if (std::fabs(newStart - n.startBeats) > 1e-6 || newPitch != static_cast<int>(n.pitch)) {
+        n.startBeats = newStart;
+        n.pitch = static_cast<uint8_t>(newPitch);
+        dragged_ = true;
+        owner_->audition(
+            misuc::dsp::midiNoteToFreq(static_cast<double>(n.pitch)),
+            n.velocity / 127.0f);
+      }
+      update();
+      return;
+    }
+    if (onResizeGrip(e->position()))
+      setCursor(Qt::SizeHorCursor);
+    else
+      unsetCursor();
   }
 
   void mouseReleaseEvent(QMouseEvent* e) override {
     Q_UNUSED(e);
+    if (resizing_) {
+      resizing_ = false;
+      if (resized_)
+        owner_->commit();
+      resized_ = false;
+      return;
+    }
     if (dragging_) {
       dragging_ = false;
       if (dragged_)

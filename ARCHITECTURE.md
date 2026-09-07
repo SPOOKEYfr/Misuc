@@ -159,7 +159,9 @@ gestures emit `PianoRoll::audition(freq, velocity)` (add / drag / click),
   its velocity (auditioned live at the new gain, committed via `edited()` after
   a 280 ms debounce so one scroll burst = one undo snapshot); each note draws a
   vertical velocity bar at its left edge, and its fill opacity rises with
-  velocity.
+  velocity. Dragging a note's right-edge grip (6 px, resize cursor on hover)
+  resizes its duration snapped to the grid, clamped to 0.1 beats and the
+  horizon, committing one undo snapshot per gesture.
 - **Audio Settings** page drives the live engine: it lists devices (output and
   input) from `PipeWireBackend::enumerateDevices`, offers sample-rate/buffer
   choices, shows latency, toggles the 440 Hz test tone and the groove beat,

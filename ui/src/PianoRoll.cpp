@@ -202,6 +202,12 @@ public:
     return std::round(beat / kSnapBeats) * kSnapBeats;
   }
 
+  // Quantize always snaps to the fixed 1/16 grid, regardless of the snap
+  // toggle (which only gates manual placement/drag gestures).
+  double quantized(double beat) const {
+    return std::round(beat / kSnapBeats) * kSnapBeats;
+  }
+
   void setPlayheadBeat(double beats, bool visible) {
     playheadBeats_ = beats;
     playheadVisible_ = visible;
@@ -294,6 +300,37 @@ public:
     int velocity;
     double dur;
   };
+
+  // Snaps the selection's start beats to the grid (or every note when nothing
+  // is selected) and commits one undo snapshot if anything moved.
+  void quantizeSelection() {
+    Track* t = trackEdit();
+    if (!t)
+      return;
+    std::vector<int> targets;
+    if (selected_ >= 0)
+      targets.push_back(selected_);
+    for (const int i : selectSet_)
+      if (i != selected_)
+        targets.push_back(i);
+    if (targets.empty())
+      for (size_t i = 0; i < t->notes.size(); ++i)
+        targets.push_back(static_cast<int>(i));
+    bool changed = false;
+    for (const int i : targets) {
+      if (i < 0 || i >= static_cast<int>(t->notes.size()))
+        continue;
+      NoteEvent& n = t->notes[i];
+      const double q = quantized(n.startBeats);
+      if (std::fabs(q - n.startBeats) > 1e-6) {
+        n.startBeats = q;
+        changed = true;
+      }
+    }
+    update();
+    if (changed)
+      owner_->commit();
+  }
 
   void copySelection() {
     Track* t = trackEdit();
@@ -681,6 +718,11 @@ protected:
         return;
       }
     }
+    if (e->key() == Qt::Key_Q) {
+      quantizeSelection();
+      e->accept();
+      return;
+    }
     QWidget::keyPressEvent(e);
   }
 
@@ -780,6 +822,10 @@ void PianoRoll::setTrack(const QString& id) {
   trackId_ = id;
   canvas_->selected_ = -1;
   refresh();
+}
+
+void PianoRoll::quantize() {
+  canvas_->quantizeSelection();
 }
 
 void PianoRoll::setPlayhead(bool playing, double beats) {

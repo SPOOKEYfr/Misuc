@@ -217,6 +217,18 @@ be refined as development proceeds.
   at 1.5/5.5, and a second paste anchors at a visible playhead (7.0/11.0), with
   exactly one commit per paste and pitch/velocity/duration preserved throughout.
 
+## Phase 8 — Quantize (done)
+
+- A toolbar `Quantize` button (and the `Q` key) snaps the selection's start
+  beats to the fixed 1/16 grid; with nothing selected it snaps every note.
+  Quantize is independent of the snap toggle (which only gates manual gestures),
+  never auditions or inserts, and commits exactly one undo snapshot when
+  anything moved.
+- No engine or session changes. UI harness (107 checks, +11): the key and the
+  button each quantize a selection (3.7→3.75, 9.4→9.5) with one commit, an
+  unselected notes run also works, off-grid neighbors are untouched, and no
+  audition fires during quantize.
+
 ## Phase 8+ — Beyond
 
 - VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU

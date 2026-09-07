@@ -92,9 +92,14 @@ EditorPage::EditorPage(Session& session, QWidget* parent)
   });
   connect(snapChk_, &QCheckBox::toggled, this,
           [this](bool on) { piano_->setSnap(on); });
+  auto* quantizeBtn = new QPushButton(QStringLiteral("Quantize"), this);
+  connect(quantizeBtn, &QPushButton::clicked, this, [this] {
+    piano_->quantize();
+  });
   toolbar->addWidget(zoomLabel);
   toolbar->addWidget(zoomSlider_);
   toolbar->addWidget(snapChk_);
+  toolbar->addWidget(quantizeBtn);
   toolbar->addStretch();
   editorCol->addLayout(toolbar);
 

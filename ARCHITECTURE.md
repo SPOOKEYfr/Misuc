@@ -169,7 +169,8 @@ gestures emit `PianoRoll::audition(freq, velocity)` (add / drag / click),
 - **Editor** page (Phase 8): `Ctrl+C` copies the selection, `Ctrl+V` pastes it
   anchored at the visible playhead (or one grid step right of the copy origin),
   and `Ctrl+D` duplicates it; each paste commits one undo snapshot and selects
-  the pasted notes.
+  the pasted notes. A `Quantize` button (or `Q`) snaps the selection — or all
+  notes when none are selected — to the 1/16 grid in one undo step.
 - **Audio Settings** page drives the live engine: it lists devices (output and
   input) from `PipeWireBackend::enumerateDevices`, offers sample-rate/buffer
   choices, shows latency, toggles the 440 Hz test tone and the groove beat,

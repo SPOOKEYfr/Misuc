@@ -80,6 +80,8 @@ public:
   double zoom() const { return pxPerBeat_; }
   void setSnap(bool on) { snap_ = on; }
   bool snap() const { return snap_; }
+  // Snaps the selection (or all notes) to the grid; one undo snapshot.
+  void quantize();
 
   // Ruler/keyboard/canvas geometry shared with the drawing code.
   static constexpr int kKeyWidth = 60;

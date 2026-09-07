@@ -57,6 +57,7 @@ void TransportBar::setLoopOn(bool on) {
 
 void TransportBar::refresh() {
   playing_ = engine_.isTransportPlaying();
+  recording_ = engine_.isRecording();
   playhead_ = engine_.playheadSamples();
   const misuc::engine::Transport& tr = engine_.transport();
   const double t = tr.tempo();
@@ -89,6 +90,7 @@ void TransportBar::paintEvent(QPaintEvent*) {
   stopBtn_ = buttonRect(top, 1);
   clickBtn_ = buttonRect(top, 2);
   loopBtn_ = buttonRect(top, 3);
+  recordBtn_ = buttonRect(top, 4);
 
   // Play button.
   {
@@ -163,6 +165,23 @@ void TransportBar::paintEvent(QPaintEvent*) {
     p.restore();
   }
 
+  // Record button (red when armed, filled dot glyph).
+  {
+    QPainterPath path;
+    path.addEllipse(recordBtn_);
+    p.save();
+    QColor ring = recording_ ? theme::kDanger : theme::kBorderBright;
+    QColor fill = recording_ ? QColor(0x3d, 0x14, 0x14) : theme::kPanelRaised;
+    p.setBrush(fill);
+    p.setPen(QPen(ring, 1.5));
+    p.drawPath(path);
+    p.setPen(Qt::NoPen);
+    p.setBrush(recording_ ? theme::kDanger : theme::kTextDim);
+    const double cx = recordBtn_.center().x(), cy = recordBtn_.center().y();
+    p.drawEllipse(QPointF(cx, cy), recording_ ? 7.5 : 5.5, recording_ ? 7.5 : 5.5);
+    p.restore();
+  }
+
   // Position readout.
   displayRect_ = QRectF(clickBtn_.right() + 28, y, 210, 40);
   p.setBrush(theme::kPanelSunken);
@@ -212,6 +231,10 @@ void TransportBar::mousePressEvent(QMouseEvent* event) {
   } else if (loopBtn_.contains(pos)) {
     loopOn_ = !loopOn_;
     emit loopToggled(loopOn_);
+    update();
+  } else if (recordBtn_.contains(pos)) {
+    recording_ = !recording_;
+    emit recordToggled(recording_);
     update();
   }
   QWidget::mousePressEvent(event);

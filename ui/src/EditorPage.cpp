@@ -1,13 +1,19 @@
 #include "EditorPage.h"
 
+#include <cmath>
+
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QLabel>
 #include <QCheckBox>
 #include <QHBoxLayout>
+#include <QMessageBox>
 #include <QVBoxLayout>
 #include <QListWidget>
 #include <QPushButton>
 #include <QSlider>
 
+#include <misuc/engine/audio/WavFile.h>
 #include <misuc/engine/project/Session.h>
 
 #include "PianoRoll.h"
@@ -15,6 +21,7 @@
 
 using misuc::project::Session;
 using misuc::project::Track;
+using misuc::project::AudioClip;
 
 namespace misuc::ui {
 
@@ -96,10 +103,13 @@ EditorPage::EditorPage(Session& session, QWidget* parent)
   connect(quantizeBtn, &QPushButton::clicked, this, [this] {
     piano_->quantize();
   });
+  auto* importBtn = new QPushButton(QStringLiteral("Import Audio\u2026"), this);
+  connect(importBtn, &QPushButton::clicked, this, &EditorPage::importAudio);
   toolbar->addWidget(zoomLabel);
   toolbar->addWidget(zoomSlider_);
   toolbar->addWidget(snapChk_);
   toolbar->addWidget(quantizeBtn);
+  toolbar->addWidget(importBtn);
   toolbar->addStretch();
   editorCol->addLayout(toolbar);
 
@@ -189,6 +199,60 @@ void EditorPage::removeTrack() {
   piano_->setTrack(QString());
   emitEdited();
   rebuildTrackList();
+}
+
+void EditorPage::importAudio() {
+  const QString src = QFileDialog::getOpenFileName(
+      this, QStringLiteral("Import audio"),
+      QString(),
+      QStringLiteral("Audio files (*.wav *.flac *.ogg *.aiff *.aif)"));
+  if (src.isEmpty())
+    return;
+
+  misuc::audio::AudioBuffer buf;
+  std::string err;
+  if (!misuc::audio::readAudioFile(src.toStdString(), buf, err)) {
+    QMessageBox::warning(this, QStringLiteral("Import failed"),
+                         QString::fromStdString(err));
+    return;
+  }
+
+  QString final = src;
+  if (importAudioSink)
+    final = importAudioSink(src);
+  if (final.isEmpty())
+    return;
+
+  const std::string want = piano_->trackId().toStdString();
+  Track* t = session_->findTrack(want);
+  std::string tid = want;
+  if (!t) {
+    if (session_->tracks().empty())
+      session_->addTrack("Track 1");
+    tid = session_->tracks().front().id;
+  }
+
+  AudioClip c;
+  c.name = QFileInfo(final).completeBaseName().toStdString();
+  c.sourceFile = final.toStdString();
+  c.durationBeats = session_->tempo() > 0.0
+                        ? buf.durationSeconds() * session_->tempo() / 60.0
+                        : 1.0;
+  c.sampleRate =
+      static_cast<uint32_t>(std::lround(buf.sampleRate));
+  c.channels = static_cast<uint16_t>(buf.channels);
+  session_->addClip(tid, std::move(c));
+
+  selectedId_ = QString::fromStdString(tid);
+  emitEdited();
+  piano_->setTrack(QString::fromStdString(tid));
+  for (int r = 0; r < trackList_->count(); ++r) {
+    if (trackList_->item(r)->data(Qt::UserRole).toString().toStdString() ==
+        tid) {
+      trackList_->setCurrentRow(r);
+      break;
+    }
+  }
 }
 
 void EditorPage::onSelectionChanged(int row) {

@@ -58,7 +58,8 @@ public:
 
   static Json parse(const std::string& text);
 
-  // Current .misuc schema version (v2 adds tracks + MIDI notes).
+  // Current .misuc schema version (v2 adds tracks with MIDI notes; audio
+  // clips under each track are a compatible additive extension).
   static constexpr int kSchemaVersion = 2;
 
 private:

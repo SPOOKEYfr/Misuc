@@ -6,8 +6,11 @@
 #include <QApplication>
 #include <QButtonGroup>
 #include <QCloseEvent>
+#include <QDateTime>
+#include <QDir>
 #include <QFile>
 #include <QFileDialog>
+#include <QFileInfo>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
@@ -19,7 +22,9 @@
 #include <QPainter>
 
 #include <misuc/engine/audio/AudioEngine.h>
+#include <misuc/engine/audio/ClipScore.h>
 #include <misuc/engine/audio/MidiScore.h>
+#include <misuc/engine/audio/WavFile.h>
 
 #include "AudioSettingsPage.h"
 #include "EditorPage.h"
@@ -57,6 +62,8 @@ MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
       editorPage_->piano()->setLoop(false, 0.0, 0.0);
     }
   });
+  connect(transport_, &TransportBar::recordToggled, this,
+          &MainWindow::onRecordToggled);
 
   // Middle: nav rail + page stack.
   auto* middle = new QWidget(central);
@@ -110,6 +117,7 @@ MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
   // Seed the undo history so the first edit has something to revert to.
   undo_.push(session_);
   rebuildMidiScore();
+  rebuildClipScore();
 
   // Poll transport + status at 30 Hz.
   timer_ = new QTimer(this);
@@ -162,6 +170,10 @@ void MainWindow::buildPages() {
   pages_->addWidget(editorPage_);
   pages_->addWidget(new AudioSettingsPage(engine_, this));
 
+  editorPage_->importAudioSink = [this](const QString& src) {
+    return stageAudioFile(src);
+  };
+
   connect(projectPage_, &ProjectPage::edited, this,
           &MainWindow::onSessionEdited);
   connect(editorPage_, &EditorPage::edited, this,
@@ -178,6 +190,7 @@ void MainWindow::onSessionEdited() {
   applyTempoToEngine();
   applyLoopToEngine(session_);
   rebuildMidiScore();
+  rebuildClipScore();
   undoCmd_->setEnabled(undo_.canUndo());
   redoCmd_->setEnabled(undo_.canRedo());
   updateWindowTitle();
@@ -187,6 +200,101 @@ void MainWindow::rebuildMidiScore() {
   std::vector<misuc::dsp::MidiNote> notes;
   misuc::engine::buildMidiScore(session_, notes);
   engine_.setScore(std::move(notes));
+}
+
+void MainWindow::rebuildClipScore() {
+  std::vector<misuc::dsp::PlaybackClip> clips;
+  std::vector<float> storage;
+  std::string err;
+  misuc::engine::buildClipScore(session_, clips, storage, err);
+  engine_.setClips(std::move(clips), std::move(storage));
+}
+
+void MainWindow::onRecordToggled(bool on) {
+  if (on) {
+    // Arm recording. Start from the current transport position so the clip
+    // lands exactly where it was recorded.
+    const double bpm = session_.tempo();
+    if (bpm > 0.0) {
+      recordStartBeats_ =
+          static_cast<double>(engine_.playheadSamples()) /
+          ((60.0 / bpm) * engine_.sampleRate());
+    } else {
+      recordStartBeats_ = 0.0;
+    }
+    if (!engine_.isTransportPlaying())
+      engine_.play(false);
+    engine_.startRecord();
+    return;
+  }
+
+  engine_.stopRecord();
+  std::vector<float> samples;
+  uint32_t sr = 0, ch = 0;
+  if (!engine_.takeRecordedSamples(samples, sr, ch) || sr == 0 ||
+      ch == 0 || samples.empty())
+    return;
+
+  // Stage the recording next to the project (like an import) and place the
+  // clip on the currently selected track at the recording's start beat.
+  ++recordCounter_;
+  const QString baseName = QStringLiteral("clip_%1").arg(recordCounter_, 3, 10,
+                                                         QLatin1Char('0'));
+  const QString wavName = baseName + QStringLiteral("_%1.wav")
+                              .arg(QDateTime::currentMSecsSinceEpoch());
+  const QString projectHome =
+      projectPath_.isEmpty()
+          ? QDir::tempPath()
+          : QFileInfo(projectPath_).absolutePath();
+  QDir().mkpath(QDir(projectHome).filePath(QStringLiteral("audio")));
+  const QString wavPath =
+      QDir(projectHome).filePath(QStringLiteral("audio/") + wavName);
+  std::string werr;
+  if (!misuc::audio::writeWavSamples(wavPath.toStdString(), samples.data(),
+                                     samples.size(), 1, sr,
+                                     /*pcm16=*/false, werr))
+    return;
+
+  misuc::project::Track* t =
+      session_.findTrack(editorPage_->piano()->trackId().toStdString());
+  std::string tid;
+  if (t) {
+    tid = t->id;
+  } else {
+    if (session_.tracks().empty())
+      session_.addTrack("Track 1");
+    tid = session_.tracks().front().id;
+    editorPage_->piano()->setTrack(QString::fromStdString(tid));
+  }
+
+  misuc::project::AudioClip c;
+  c.name = baseName.toStdString();
+  c.sourceFile = wavPath.toStdString();
+  c.startBeats = recordStartBeats_;
+  c.durationBeats = session_.tempo() > 0.0
+                        ? (samples.size() / static_cast<double>(sr)) *
+                              session_.tempo() / 60.0
+                        : 1.0;
+  c.sampleRate = sr;
+  c.channels = 1;
+  session_.addClip(tid, std::move(c));
+  onSessionEdited();
+}
+
+QString MainWindow::stageAudioFile(const QString& src) const {
+  if (projectPath_.isEmpty())
+    return src; // no project on disk yet: reference the original file
+  QFileInfo si(src);
+  if (!si.exists())
+    return src;
+  const QString dir =
+      QDir(QFileInfo(projectPath_).absolutePath()).filePath(QStringLiteral("audio"));
+  if (!QDir().mkpath(dir))
+    return src;
+  const QString dst = QDir(dir).filePath(si.fileName());
+  if (QFileInfo(dst).exists() || QFile::copy(src, dst))
+    return dst;
+  return src;
 }
 
 void MainWindow::poll() {
@@ -232,6 +340,7 @@ void MainWindow::newProject() {
   editorPage_->refresh();
   applyTempoToEngine();
   rebuildMidiScore();
+  rebuildClipScore();
   undoCmd_->setEnabled(false);
   redoCmd_->setEnabled(false);
   updateWindowTitle();
@@ -270,6 +379,7 @@ void MainWindow::openProject(const QString& path) {
   applyTempoToEngine();
   applyLoopToEngine(session_);
   rebuildMidiScore();
+  rebuildClipScore();
   undoCmd_->setEnabled(false);
   redoCmd_->setEnabled(false);
   updateWindowTitle();
@@ -312,6 +422,7 @@ void MainWindow::performUndo() {
   applyTempoToEngine();
   applyLoopToEngine(session_);
   rebuildMidiScore();
+  rebuildClipScore();
   dirty_ = true;
   undoCmd_->setEnabled(undo_.canUndo());
   redoCmd_->setEnabled(undo_.canRedo());
@@ -327,6 +438,7 @@ void MainWindow::performRedo() {
   applyTempoToEngine();
   applyLoopToEngine(session_);
   rebuildMidiScore();
+  rebuildClipScore();
   dirty_ = true;
   undoCmd_->setEnabled(undo_.canUndo());
   redoCmd_->setEnabled(undo_.canRedo());

@@ -2,6 +2,7 @@
 
 #include <QWidget>
 #include <QString>
+#include <functional>
 
 namespace misuc::project {
 class Session;
@@ -29,6 +30,11 @@ public:
   // The active piano roll, so the main window can wire audition + playhead.
   PianoRoll* piano() const { return piano_; }
 
+  // Optional hook to relocate an imported source file before the clip is
+  // created (e.g. copy it into the project's audio/ directory). Returns the
+  // final path to reference; an empty result aborts the import.
+  std::function<QString(const QString&)> importAudioSink;
+
 signals:
   void edited();
 
@@ -36,6 +42,7 @@ private:
   void rebuildTrackList();
   void addTrack();
   void removeTrack();
+  void importAudio();
   void onSelectionChanged(int row);
   void emitEdited() { emit edited(); }
 

@@ -250,6 +250,48 @@ be refined as development proceeds.
   paints the shaded region (1560 loop pixels vs 0 outside), and the region
   survives a save/load round-trip.
 
+## Phase 8+ — Audio clips: record, timeline, playback, import, export (done)
+
+- **Session** gains audio clips: a `Track` can carry an ordered list of
+  `AudioClip`s (name, source file, start/duration in beats, sample rate,
+  channels), serialized additively in v2 documents (v1 files still load).
+- **WAV I/O** (`audio/WavFile.{h,cpp}`, libsndfile): `readAudioFile` (format,
+  frames, rate, channels, floats) and `writeWavSamples` (PCM16 or float).
+- **`dsp::ClipPlayer`**: a sidechain player that renders each clip's
+  sample-accurately on the audio thread from a published triple-buffer
+  snapshot (`AudioEngine::setClips(clips, storage)`), resampled to the output
+  rate, amplitude-gated by the track, phase-continuous across block edges and
+  rewind/loop. (Fixed a real bug here: the right channel was written at
+  `outR[n * stride + 1]` with `outR` already channel-offset, leaving R silent
+  and smearing the tone into the wrong slot.)
+- **`audio/ClipScore.h`**: `buildClipScore` sorts active unmuted clips by
+  start beat and bounds them against a time horizon, mirroring the MIDI score.
+- **AudioEngine record**: capture runs only while the transport plays;
+  `startRecord`/`stopRecord`/`takeRecordedSamples` bound the buffer at 5
+  minutes; recorded samples are retrievable for the UI to persist as WAV. The
+  loop-path rendering harness writes a clip to WAV over a 16-beat span and
+  verifies per-beat RMS (one tone could beat-by-beat, the transient-injecting
+  clip peak scans, silence after the clip).
+- **UI**: the piano roll grows a 28 px audio-clip lane above the note grid
+  that paints waveform strips (peak-binned per 16th, cached by content
+  signature), selects/drags/un-snaps a clip across the timeline (one undo
+  step), and deletes it with Del/Backspace or right-click. A record button on
+  the transport bar arms recording from the playhead and, when stopped, writes
+  the take to `<project>/audio/clip_NNN_<epoch>.wav` and drops a clip on the
+  active track. An "Import Audio…" toolbar button reads WAV/FLAC/OGG/AIFF,
+  computes duration from the tempo, and adds the clip (staged into the project
+  folder when one is open). Every route into the session (edit, undo/redo,
+  new/open) rebuilds and republishes the clip score, so clips follow the
+  transport live.
+- A heap-corruption bug found while testing this landed in the unrecord test
+  itself (`out(1024)` < 2×4800-frame chunk writes), not the engine; the scratch
+  buffer was corrected to `kChunk * 2`.
+- Engine suite green: 54092 checks, 0 failures. UI harness (129 checks, +14)
+  now drives the clip lane headlessly: a generated tone clip paints its lane
+  strip (614 clip pixels, zero below), drag commits startBeats 2→4 under one
+  undo snapshot with duration untouched, Del removes it with one commit, and
+  clips survive a save/load round-trip.
+
 ## Phase 8+ — Beyond
 
 - VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU

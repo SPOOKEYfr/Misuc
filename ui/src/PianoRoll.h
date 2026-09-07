@@ -107,6 +107,7 @@ public:
   // Ruler/keyboard/canvas geometry shared with the drawing code.
   static constexpr int kKeyWidth = 60;
   static constexpr int kRulerH = 26;
+  static constexpr int kClipLaneH = 28; // audio-clip lane above the note grid
   static constexpr int kRowH = 18;
   static constexpr int kLowPitch = 24; // C1
   static constexpr int kRowCount = 61; // pitches 24..84 (C1..C6)

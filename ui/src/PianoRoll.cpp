@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include <QFontMetrics>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QMouseEvent>
 #include <QPainter>
@@ -13,11 +14,15 @@
 #include <QVBoxLayout>
 #include <QWheelEvent>
 
+#include <map>
+
 #include "Theme.h"
 
+#include <misuc/engine/audio/WavFile.h>
 #include <misuc/engine/dsp/Midi.h>
 
 using misuc::project::NoteEvent;
+using misuc::project::AudioClip;
 using misuc::project::Track;
 
 namespace misuc::ui {
@@ -31,10 +36,13 @@ constexpr int kVelocityCommitMs = 280;  // undo-snapshot debounce
 constexpr double kResizeGrabPx = 6.0;   // right-edge grab band, px
 constexpr double kMinDurationBeats = 0.1;
 
-int pitchRowY(int pitch, int rowH) { return (kHighPitch - pitch) * rowH; }
+int pitchRowY(int pitch, int rowH) {
+  return PianoRoll::kClipLaneH + (kHighPitch - pitch) * rowH;
+}
 
 int yToPitch(int y, int rowH) {
-  return std::clamp(kHighPitch - y / rowH, PianoRoll::kLowPitch, kHighPitch);
+  return std::clamp(kHighPitch - (y - PianoRoll::kClipLaneH) / rowH,
+                    PianoRoll::kLowPitch, kHighPitch);
 }
 
 bool isBlackKey(int pitch) {
@@ -193,7 +201,9 @@ PianoKeys::PianoKeys(QWidget* parent) : QWidget(parent) {
 }
 
 QSize PianoKeys::sizeHint() const {
-  return QSize(PianoRoll::kKeyWidth, PianoRoll::kRowCount * PianoRoll::kRowH);
+  return QSize(PianoRoll::kKeyWidth,
+               PianoRoll::kRowCount * PianoRoll::kRowH +
+                   PianoRoll::kClipLaneH);
 }
 
 void PianoKeys::setRange(int lowPitch, int rowH, int vbar) {
@@ -245,7 +255,7 @@ public:
     setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     setFixedSize(
         static_cast<int>(PianoRoll::kHorizonBeats * owner_->pxPerBeat_) + 1,
-        PianoRoll::kRowCount * PianoRoll::kRowH + 1);
+        PianoRoll::kRowCount * PianoRoll::kRowH + PianoRoll::kClipLaneH + 1);
     // Wheel velocity edits are committed once the gesture settles so a single
     // scroll burst produces exactly one undo snapshot.
     velocityTimer_.setSingleShot(true);
@@ -313,6 +323,64 @@ public:
     return QRectF(x, y, w, owner_->kRowH - 1);
   }
 
+  // --- Audio clips -------------------------------------------------------
+
+  QRectF clipRect(const AudioClip& c) const {
+    const double x = beatToX(c.startBeats);
+    const double w = std::max<double>(3.0, c.durationBeats * owner_->pxPerBeat_ - 1.0);
+    return QRectF(x, 3, w, PianoRoll::kClipLaneH - 6);
+  }
+
+  int hitTestClip(const QPointF& pos) const {
+    const Track* t = track();
+    if (!t || pos.y() >= PianoRoll::kClipLaneH)
+      return -1;
+    for (size_t i = 0; i < t->clips.size(); ++i)
+      if (clipRect(t->clips[i]).contains(pos))
+        return static_cast<int>(i);
+    return -1;
+  }
+
+  // Decimated per-beat peak bins (16/beat, capped at 1024) for the clip's
+  // waveform. Cached by a content signature so the paint loop (30 Hz) never
+  // re-reads audio files; a stale cache entry just triggers one re-read.
+  struct WaveCache {
+    std::vector<float> peaks;
+    bool ok = false;
+  };
+
+  const WaveCache& waveFor(const AudioClip& c) {
+    const size_t bins = std::clamp<size_t>(
+        static_cast<size_t>(std::ceil(c.durationBeats * 16.0)), 1, 1024);
+    QFileInfo fi(QString::fromStdString(c.sourceFile));
+    const std::string sig =
+        c.id + "#" + std::to_string(bins) + "#" +
+        std::to_string(fi.size()) + "#" +
+        QString::number(fi.lastModified().toMSecsSinceEpoch()).toStdString();
+    auto it = waves_.find(sig);
+    if (it != waves_.end())
+      return it->second;
+    WaveCache wc;
+    misuc::audio::AudioBuffer b;
+    std::string err;
+    if (misuc::audio::readAudioFile(c.sourceFile, b, err)) {
+      const uint32_t ch = std::max<uint32_t>(1, b.channels);
+      const uint64_t nFrames = b.frames;
+      wc.peaks.assign(bins, 0.f);
+      for (size_t bin = 0; bin < bins; ++bin) {
+        const uint64_t s0 = (nFrames * bin) / bins;
+        const uint64_t s1 = (nFrames * (bin + 1)) / bins;
+        float mx = 0.f;
+        for (uint64_t k = s0; k < s1; ++k)
+          for (uint32_t ci = 0; ci < ch; ++ci)
+            mx = std::max(mx, std::fabs(b.samples[static_cast<size_t>(k) * ch + ci]));
+        wc.peaks[bin] = mx;
+      }
+      wc.ok = true;
+    }
+    return waves_.emplace(sig, std::move(wc)).first->second;
+  }
+
   void addNoteAt(double beat, int pitch) {
     Track* t = trackEdit();
     if (!t)
@@ -335,6 +403,8 @@ public:
            std::find(selectSet_.begin(), selectSet_.end(), index) !=
                selectSet_.end();
   }
+
+  bool isClipSelected(int index) const { return index == selectedClip_; }
 
   // Removes the given (descending) indices and invalidates all selection
   // state; callers commit once afterward.
@@ -470,6 +540,12 @@ public:
   bool resizing_ = false;
   bool resized_ = false;
   int resizeIndex_ = -1;
+  int selectedClip_ = -1;
+  bool clipDragging_ = false;
+  bool clipDragged_ = false;
+  int clipDragIndex_ = -1;
+  double clipDragOffsetBeats_ = 0.0;
+  std::map<std::string, WaveCache> waves_;
   double playheadBeats_ = -1.0;
   bool playheadVisible_ = false;
   QTimer velocityTimer_;
@@ -480,8 +556,6 @@ protected:
     p.fillRect(rect(), theme::kPanelSunken);
     const Track* t = track();
     const int barBeats = owner_->session_.timeSigNumerator();
-
-    // Vertical grid: sixteenths faint, quarters normal, bars strong.
     const int lastBeat = static_cast<int>(PianoRoll::kHorizonBeats);
     for (int b = 0; b <= lastBeat; ++b) {
       const double x = beatToX(b);
@@ -504,6 +578,45 @@ protected:
       p.drawText(rect(), Qt::AlignCenter,
                  QStringLiteral("Select or add a track to edit notes"));
       return;
+    }
+
+    // Audio-clip lane: waveform strips over the first kClipLaneH rows.
+    if (selectedClip_ >= static_cast<int>(t->clips.size()))
+      selectedClip_ = -1;
+    p.setPen(QPen(theme::kBorder, 1));
+    p.drawLine(QPointF(0, PianoRoll::kClipLaneH),
+               QPointF(width(), PianoRoll::kClipLaneH));
+    for (size_t i = 0; i < t->clips.size(); ++i) {
+      const AudioClip& c = t->clips[i];
+      const QRectF r = clipRect(c);
+      const bool sel = isClipSelected(static_cast<int>(i));
+      p.setPen(QPen(sel ? theme::kOk : theme::kBorderBright, 1));
+      p.setBrush(QColor(0x1d, 0x33, 0x47));
+      p.drawRoundedRect(r.adjusted(0, 0, -1, -1), 3, 3);
+      const WaveCache& w = waveFor(c);
+      if (w.ok && w.peaks.size() > 1) {
+        const double wTop = r.top() + 2;
+        const double wBot = r.bottom() - 2;
+        const double wH = wBot - wTop;
+        const double binW = r.width() / static_cast<double>(w.peaks.size());
+        for (size_t bin = 0; bin < w.peaks.size(); ++bin) {
+          const double bx = r.left() + bin * binW;
+          const float amp = std::clamp(w.peaks[bin], 0.f, 1.f);
+          const double vh = std::max(1.0, amp * wH);
+          p.fillRect(QRectF(bx, wBot - vh, std::max(1.0, binW), vh),
+                     QColor(0x6f, 0xb5, 0xde, amp > 0.f ? 190 : 60));
+        }
+      }
+      const double nw = r.width() - 8;
+      if (nw > 24) {
+        p.setPen(theme::kTextDim);
+        p.setFont(theme::monoFont(8));
+        const QFontMetrics fm = p.fontMetrics();
+        p.drawText(
+            r.adjusted(4, 0, -4, 0), Qt::AlignLeft | Qt::AlignVCenter,
+            fm.elidedText(QString::fromStdString(c.name), Qt::ElideRight,
+                          static_cast<int>(nw)));
+      }
     }
 
     for (size_t i = 0; i < t->notes.size(); ++i) {
@@ -551,6 +664,27 @@ protected:
     setFocus();
     const QPointF pos = e->position();
     if (e->button() == Qt::LeftButton) {
+      const int chit = hitTestClip(pos);
+      if (chit >= 0 || (pos.y() < PianoRoll::kClipLaneH && track())) {
+        // Pressing in the clip lane selects/drags the clip there (or clears
+        // clip selection on empty lane space); it never starts note gestures.
+        selectedClip_ = chit;
+        selected_ = -1;
+        selectSet_.clear();
+        if (chit >= 0) {
+          const Track* t = track();
+          clipDragIndex_ = chit;
+          clipDragging_ = true;
+          clipDragged_ = false;
+          clipDragOffsetBeats_ =
+              xToBeat(pos.x()) - t->clips[chit].startBeats;
+        } else {
+          clipDragging_ = false;
+          clipDragIndex_ = -1;
+        }
+        update();
+        return;
+      }
       if (onResizeGrip(pos)) {
         const int hit = hitTest(pos);
         selected_ = hit;
@@ -603,6 +737,20 @@ protected:
       }
       update();
     } else if (e->button() == Qt::RightButton) {
+      const int chit = hitTestClip(pos);
+      if (chit >= 0) {
+        Track* t = trackEdit();
+        if (t && chit < static_cast<int>(t->clips.size())) {
+          t->clips.erase(t->clips.begin() + chit);
+          if (selectedClip_ >= chit)
+            --selectedClip_;
+          if (selectedClip_ < -1)
+            selectedClip_ = -1;
+          owner_->commit();
+        }
+        update();
+        return;
+      }
       const int hit = hitTest(pos);
       if (hit >= 0)
         deleteNote(hit);
@@ -615,6 +763,24 @@ protected:
   }
 
   void mouseMoveEvent(QMouseEvent* e) override {
+    if (clipDragging_) {
+      Track* t = trackEdit();
+      if (t && clipDragIndex_ >= 0 &&
+          clipDragIndex_ < static_cast<int>(t->clips.size())) {
+        const double beat = xToBeat(e->position().x());
+        const double ns = std::clamp(
+            snapped(beat - clipDragOffsetBeats_), 0.0,
+            PianoRoll::kHorizonBeats - t->clips[clipDragIndex_].durationBeats);
+        AudioClip& c = t->clips[clipDragIndex_];
+        if (std::fabs(ns - c.startBeats) > 1e-6) {
+          c.startBeats = ns;
+          clipDragged_ = true;
+          update();
+        }
+      }
+      e->accept();
+      return;
+    }
     if (resizing_) {
       Track* t = trackEdit();
       if (t && resizeIndex_ >= 0 &&
@@ -711,6 +877,14 @@ protected:
 
   void mouseReleaseEvent(QMouseEvent* e) override {
     Q_UNUSED(e);
+    if (clipDragging_) {
+      clipDragging_ = false;
+      clipDragIndex_ = -1;
+      if (clipDragged_)
+        owner_->commit();
+      clipDragged_ = false;
+      return;
+    }
     if (selecting_) {
       selecting_ = false;
       update();
@@ -735,6 +909,13 @@ protected:
 
   void mouseDoubleClickEvent(QMouseEvent* e) override {
     const QPointF pos = e->position();
+    if (pos.y() < PianoRoll::kClipLaneH) {
+      selectedClip_ = hitTestClip(pos);
+      selected_ = -1;
+      selectSet_.clear();
+      update();
+      return;
+    }
     const int hit = hitTest(pos);
     if (hit >= 0)
       deleteNote(hit);
@@ -745,6 +926,16 @@ protected:
 
   void keyPressEvent(QKeyEvent* e) override {
     if (e->key() == Qt::Key_Delete || e->key() == Qt::Key_Backspace) {
+      if (selectedClip_ >= 0) {
+        Track* t = trackEdit();
+        if (t && selectedClip_ < static_cast<int>(t->clips.size())) {
+          t->clips.erase(t->clips.begin() + selectedClip_);
+          selectedClip_ = -1;
+          owner_->commit();
+        }
+        e->accept();
+        return;
+      }
       std::vector<int> doomed;
       if (selected_ >= 0)
         doomed.push_back(selected_);
@@ -894,6 +1085,7 @@ PianoRoll::PianoRoll(misuc::project::Session& session, QWidget* parent)
 void PianoRoll::setTrack(const QString& id) {
   trackId_ = id;
   canvas_->selected_ = -1;
+  canvas_->selectedClip_ = -1;
   refresh();
 }
 
@@ -953,7 +1145,7 @@ void PianoRoll::setZoom(double px) {
   pxPerBeat_ = std::clamp(px, 8.0, 160.0);
   canvas_->setFixedSize(
       static_cast<int>(kHorizonBeats * pxPerBeat_) + 1,
-      kRowCount * kRowH + 1);
+      kRowCount * kRowH + kClipLaneH + 1);
   refresh();
 }
 

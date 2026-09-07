@@ -12,6 +12,10 @@ std::string Session::newTrackId() {
   return "track-" + std::to_string(++trackCounter_);
 }
 
+std::string Session::newClipId() {
+  return "clip-" + std::to_string(++clipCounter_);
+}
+
 std::string Session::addTrack(std::string name) {
   Track t;
   t.id = newTrackId();
@@ -42,6 +46,15 @@ const Track* Session::findTrack(const std::string& id) const {
     if (t.id == id)
       return &t;
   return nullptr;
+}
+
+std::string Session::addClip(const std::string& trackId, AudioClip clip) {
+  Track* t = findTrack(trackId);
+  if (!t)
+    return std::string();
+  clip.id = newClipId();
+  t->clips.push_back(std::move(clip));
+  return t->clips.back().id;
 }
 
 std::string Session::toJson() const {
@@ -84,6 +97,24 @@ std::string Session::toJson() const {
       notes.emplace_back(Json(std::move(nobj)));
     }
     tobj.emplace("notes", Json(std::move(notes)));
+
+    Json::Array clips;
+    for (const AudioClip& c : t.clips) {
+      Json::Object cobj;
+      cobj.emplace("id", Json(c.id));
+      cobj.emplace("name", Json(c.name));
+      cobj.emplace("sourceFile", Json(c.sourceFile));
+      cobj.emplace("startBeats", Json(c.startBeats));
+      cobj.emplace("durationBeats", Json(c.durationBeats));
+      cobj.emplace("clipOffsetBeats", Json(c.clipOffsetBeats));
+      cobj.emplace("gainDb", Json(static_cast<double>(c.gainDb)));
+      cobj.emplace("fadeInBeats", Json(c.fadeInBeats));
+      cobj.emplace("fadeOutBeats", Json(c.fadeOutBeats));
+      cobj.emplace("sampleRate", Json(static_cast<double>(c.sampleRate)));
+      cobj.emplace("channels", Json(static_cast<double>(c.channels)));
+      clips.emplace_back(Json(std::move(cobj)));
+    }
+    tobj.emplace("clips", Json(std::move(clips)));
     tracks.emplace_back(Json(std::move(tobj)));
   }
   root.emplace("tracks", Json(std::move(tracks)));
@@ -164,12 +195,47 @@ Session Session::fromJson(const std::string& text) {
           t.notes.push_back(n);
         }
       }
+
+      if (auto v = to.find("clips"); v != to.end() && v->second.isArray()) {
+        for (const Json& cj : v->second.array()) {
+          if (!cj.isObject())
+            continue;
+          const auto& co = cj.object();
+          AudioClip c;
+          if (auto x = co.find("id"); x != co.end() && x->second.isString())
+            c.id = x->second.string();
+          else
+            c.id = s.newClipId();
+          if (auto x = co.find("name"); x != co.end() && x->second.isString())
+            c.name = x->second.string();
+          if (auto x = co.find("sourceFile"); x != co.end() && x->second.isString())
+            c.sourceFile = x->second.string();
+          if (auto x = co.find("startBeats"); x != co.end() && x->second.isNumber())
+            c.startBeats = x->second.number();
+          if (auto x = co.find("durationBeats"); x != co.end() && x->second.isNumber())
+            c.durationBeats = x->second.number();
+          if (auto x = co.find("clipOffsetBeats"); x != co.end() && x->second.isNumber())
+            c.clipOffsetBeats = x->second.number();
+          if (auto x = co.find("gainDb"); x != co.end() && x->second.isNumber())
+            c.gainDb = static_cast<float>(x->second.number());
+          if (auto x = co.find("fadeInBeats"); x != co.end() && x->second.isNumber())
+            c.fadeInBeats = x->second.number();
+          if (auto x = co.find("fadeOutBeats"); x != co.end() && x->second.isNumber())
+            c.fadeOutBeats = x->second.number();
+          if (auto x = co.find("sampleRate"); x != co.end() && x->second.isNumber())
+            c.sampleRate = static_cast<uint32_t>(x->second.number());
+          if (auto x = co.find("channels"); x != co.end() && x->second.isNumber())
+            c.channels = static_cast<uint16_t>(x->second.number());
+          t.clips.push_back(std::move(c));
+        }
+      }
       s.tracks_.push_back(std::move(t));
     }
   }
 
-  // Keep the id counter ahead of any loaded track so new ids never collide.
-  for (const Track& t : s.tracks_)
+  // Keep the id counters ahead of any loaded tracks/clips so new ids never
+  // collide.
+  for (const Track& t : s.tracks_) {
     if (t.id.rfind("track-", 0) == 0) {
       const std::string num = t.id.substr(6);
       try {
@@ -179,6 +245,18 @@ Session Session::fromJson(const std::string& text) {
       } catch (const std::exception&) {
       }
     }
+    for (const AudioClip& c : t.clips) {
+      if (c.id.rfind("clip-", 0) == 0) {
+        const std::string num = c.id.substr(5);
+        try {
+          const uint32_t v = static_cast<uint32_t>(std::stoul(num));
+          if (v > s.clipCounter_)
+            s.clipCounter_ = v;
+        } catch (const std::exception&) {
+        }
+      }
+    }
+  }
 
   return s;
 }

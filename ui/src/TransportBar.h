@@ -18,12 +18,14 @@ public:
 
   void setCountInOn(bool on);
   void setLoopOn(bool on);
+  void setRecording(bool on) { recording_ = on; update(); }
   void refresh(); // pull playhead + tempo state
 
 signals:
   void tempoChanged(double bpm);
   void countInToggled(bool on);
   void loopToggled(bool on);
+  void recordToggled(bool on);
 
 protected:
   void paintEvent(QPaintEvent* event) override;
@@ -36,6 +38,7 @@ private:
   bool playing_ = false;
   bool countIn_ = true;
   bool loopOn_ = false;
+  bool recording_ = false;
   uint64_t playhead_ = 0;
   double tempo_ = 120.0;
   int tsNum_ = 4;
@@ -45,6 +48,7 @@ private:
   QRectF stopBtn_;
   QRectF clickBtn_;
   QRectF loopBtn_;
+  QRectF recordBtn_;
   QRectF displayRect_;
 };
 

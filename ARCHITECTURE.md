@@ -79,6 +79,16 @@ this queue at the top of each audio callback and applies changes.
   **wall** timebase (a monotonic frame clock) on which short audition notes
   (`triggerPreview`) sound even while the transport is stopped. A fixed 8-slot
   ring of previews absorbs flood triggers by overwriting the oldest.
+- `ClipPlayer.h` — audio-clip playback: `ClipBuffer` (raw floats, rate,
+  channels) and `ClipPlayer`, a sidechain re-synthesizer that renders clip
+  sample positions as a pure function of absolute sample time against a
+  real-time-safe snapshot (`ClipSlot` ×4 with rebound pointers), resampling to
+  the output rate and gating amplitude by the owning track. Stateless across
+  blocks like `MidiPlayer`, so rewind/loop/stop restart cleanly.
+- `WavFile.{h,cpp}` — libsndfile-backed WAV I/O: `readAudioFile` (format,
+  frame count, sample rate, channels, float samples) and `writeWavSamples`
+  (PCM16 or IEEE-float little-endian). Used by record capture and clip
+  import.
 
 ### transport
 
@@ -126,9 +136,15 @@ this queue at the top of each audio callback and applies changes.
 - `Session.{h,cpp}` — the `.misuc` project foundation as JSON
   (`kSchemaVersion = 2`): schemaVersion, app identity, metadata, transport,
   tempo, and tracks. A track carries id/name/mute/gain and a list of
-  `NoteEvent`s (pitch, velocity, start/duration in beats). Version-1 documents
-  (no tracks) still load. Owned by the main window; persisted through the File
-  menu and edited on the Project page and the Editor page.
+  `NoteEvent`s (pitch, velocity, start/duration in beats). A track may also
+  carry an ordered list of `AudioClip`s (name, source file, start/duration in
+  beats, sample rate, channels); the field is optional so version-1
+  documents (no tracks) and v2 documents without clips still load.
+- `MidiScore.h` / `ClipScore.h` — `buildMidiScore(Session, score)` flattens a
+  session into a sorted playback score (mute filtering, per-track gain +
+  velocity baked into amplitude); `buildClipScore(Session, clips)` sorts
+  active unmuted clips by start beat and bounds them against a time horizon.
+  The UI publishes both through `AudioEngine::setScore` / `setClips`.
 
 ## UI (`ui/`)
 
@@ -177,15 +193,27 @@ gestures emit `PianoRoll::audition(freq, velocity)` (add / drag / click),
   `Transport::advance()` loop wrap. The region is persisted in the Session and
   surfaced on the piano-roll ruler (green shaded region, drag to redraw) and a
   transport-bar `LOOP` toggle.
+- **Editor** page (Phase 8): the piano roll adds a 28 px audio-clip lane above
+  the note grid. Clips draw as waveform strips (peak-binned per 16th, cached
+  by content signature), press-drag un-snaps and moves one across the timeline
+  (committed on release as one undo snapshot), and Del/Backspace or
+  right-click delete it. Selecting a clip never starts note gestures; all note
+  rows are shifted down by the lane and the piano-key ruler grows to match.
+- **Import / record** (Phase 8): an "Import Audio…" button reads
+  WAV/FLAC/OGG/AIFF through `WavFile::readAudioFile`, places the clip at the
+  current playhead of the active track (staging the file into the project's
+  `audio/` folder when a project is open), and emits `edited()` once. A record
+  button on the transport bar arms capture from the playhead and, on stop,
+  writes the take as a mono WAV under `<project>/audio/clip_NNN_<epoch>.wav`
+  (temp dir when no project) and lands an `AudioClip` on the session. Every
+  path into the session (edit, undo/redo, new/open) calls
+  `rebuildClipScore()` → `buildClipScore` + `AudioEngine::setClips`, so clips
+  follow the transport live like notes.
 - **Audio Settings** page drives the live engine: it lists devices (output and
   input) from `PipeWireBackend::enumerateDevices`, offers sample-rate/buffer
   choices, shows latency, toggles the 440 Hz test tone and the groove beat,
   controls master and monitor gain, and shows live output/input meters with
   clip LEDs.
-
-- `MidiScore.h` — `buildMidiScore(Session, score)`: flattens a session into a
-  sorted playback score (mute filtering, per-track gain + velocity baked into
-  amplitude) for the UI to publish via `AudioEngine::setScore`.
 
 The UI talks only to `AudioEngine` (and through it the backend interface); it
 never touches PipeWire directly.
@@ -201,6 +229,7 @@ AudioEngine::process (AudioRenderer; input + output)
         │  count-in metronome / test tone / groove (transport-quantized)
         │  MIDI score player (stateless re-synthesis from a real-time-safe
         │  triple-buffer snapshot published by the UI on every edit)
+        │  + ClipPlayer sidechain (audio-clip slots from AudioEngine::setClips)
         │  + wall-clock preview notes (audition; independent of transport)
         │  monitored input → monitor gain smoother → output bus
         │  master-gain smoothing

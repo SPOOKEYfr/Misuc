@@ -3,6 +3,7 @@ add_library(misuc_engine STATIC
   src/core/Logger.cpp
   src/audio/PipeWireBackend.cpp
   src/audio/AudioEngine.cpp
+  src/audio/WavFile.cpp
   src/project/Session.cpp)
 
 target_include_directories(misuc_engine PUBLIC)

@@ -16,6 +16,7 @@ enum class ControlKind : uint32_t {
   MonitorGain = 7, // f0 = linear gain applied to input monitoring
   PreviewNote = 8, // d0 = freq, f0 = velocity gain (audition a note now)
   Loop        = 9, // f0 = enabled(0/1), d0 = startBeats, d1 = endBeats
+  Record      = 10, // f0 = 1 start capture, 0 = stop capture (audio input)
 };
 
 struct alignas(8) ControlMessage {

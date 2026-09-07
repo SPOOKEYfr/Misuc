@@ -54,6 +54,11 @@ private:
   void applyTempoToEngine();
   void applyLoopToEngine(misuc::project::Session& s);
   void rebuildMidiScore();
+  void rebuildClipScore();
+  void onRecordToggled(bool on);
+  // Relocate an imported or recorded audio file into the project's audio/
+  // directory when the project has a home; otherwise keep the source path.
+  QString stageAudioFile(const QString& src) const;
   void updateWindowTitle();
 
   // Ask about unsaved changes. Returns false when the user cancelled.
@@ -72,6 +77,11 @@ private:
   EditorPage* editorPage_ = nullptr;
   QTimer* timer_ = nullptr;
   QWidget* navRail_ = nullptr;
+
+  // Beat position where recording started (kept in beats so it survives
+  // engine-side resampling); used to place the finished clip on the timeline.
+  double recordStartBeats_ = 0.0;
+  int recordCounter_ = 0;
 
   QAction* undoCmd_ = nullptr;
   QAction* redoCmd_ = nullptr;

@@ -10,6 +10,7 @@
 #include <misuc/engine/audio/AudioBackend.h>
 #include <misuc/engine/core/ControlStream.h>
 #include <misuc/engine/core/RingBuffer.h>
+#include <misuc/engine/dsp/ClipPlayer.h>
 #include <misuc/engine/dsp/Dsp.h>
 #include <misuc/engine/dsp/Groove.h>
 #include <misuc/engine/dsp/Metronome.h>
@@ -58,10 +59,40 @@ public:
   void setScore(std::vector<dsp::MidiNote> notes);
   void clearScore();
 
+  // Publish decoded audio clips for playback (dsp::PlaybackClip built by
+  // engine::buildClipScore). `storage` owns the interleaved sample data that
+  // the clips reference; both are handed to the audio thread via the same
+  // real-time-safe triple-buffer pattern as the score.
+  void setClips(std::vector<dsp::PlaybackClip> clips, std::vector<float> storage);
+  void clearClips();
+
   // Audition a note immediately (freq in Hz, velocity 0..1 as amplitude).
   // Sounds via the MIDI player's wall-clock preview path, even when the
   // transport is stopped.
   void previewNote(double freq, float velocity);
+
+  // Recording -------------------------------------------------------------
+  // Capture the live audio input into an internal mono ring. startRecord()
+  // allocates the (bounded) capture buffer off the real-time thread; capture
+  // itself is RT-safe. Recording only accumulates while the transport plays.
+  void startRecord();
+  // Pushes the stop control and waits (a few ms) for the audio thread to
+  // drain it, so takeRecordedSamples() never races a live write.
+  void stopRecord();
+  bool isRecording() const noexcept;
+  // Copies the captured mono samples captured since startRecord().
+  bool takeRecordedSamples(std::vector<float>& out, uint32_t& sampleRate,
+                           uint32_t& channels) noexcept;
+  static constexpr uint64_t kMaxRecordFrames = 48000ull * 300; // 5 min at 48k
+
+  // Export ----------------------------------------------------------------
+  // Offline render of the currently published score + clips over the beat
+  // range [fromBeats, toBeats) into a WAV file (float32). Mixing, gain, fades,
+  // mute, loop-off, and master bus all flow through the live process() path so
+  // the export matches what the user hears. Must be called with the audio
+  // stream stopped.
+  bool renderToWav(const std::string& path, double fromBeats, double toBeats,
+                   uint32_t channels, std::string& err);
 
   // UI poll snapshots (loads atomics).
   bool isTransportPlaying() const noexcept;
@@ -130,6 +161,28 @@ private:
   std::atomic<int> liveSlot_{-1};
   int publishSlot_ = 0;
   dsp::MidiPlayer midiPlayer_;
+
+  // Audio clip playback slots, mirroring the score slots: the publisher fills
+  // a free slot (owning the decoded samples in `storage`), the audio thread
+  // holds at most one slot per block.
+  struct ClipSlot {
+    std::vector<float> storage;
+    std::vector<dsp::PlaybackClip> clips;
+    std::atomic<int> refs{0};
+  };
+  ClipSlot clipSlots_[3];
+  std::atomic<int> liveClipSlot_{-1};
+  int clipPublishSlot_ = 0;
+  dsp::ClipPlayer clipPlayer_;
+
+  // Audio input recording state (audio-thread owned once armed). Linear input
+  // capture into a fixed buffer allocated on the control thread; the audio
+  // thread only writes and never reallocates.
+  bool recording_ = false;
+  std::vector<float> recordBuffer_; // mono, kMaxRecordFrames floats
+  uint64_t recordWritePos_ = 0;
+  std::atomic<bool> recordingActive_{false};
+  std::atomic<uint64_t> recordingFrames_{0};
 
   // Monotonic wall-clock frame counter (independent of transport) used for
   // note audition previews; incremented every process() block.

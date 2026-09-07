@@ -6,6 +6,7 @@
 #include <thread>
 
 #include <misuc/engine/audio/PipeWireBackend.h>
+#include <misuc/engine/audio/WavFile.h>
 #include <misuc/engine/core/Logger.h>
 
 using misuc::core::logInfo;
@@ -24,6 +25,8 @@ AudioEngine::AudioEngine(std::unique_ptr<AudioBackend> backend)
   inMeter_.setDecaySeconds(0.35f, 0.30f);
   setMasterGainDb(0.f);
   setMonitorGainDb(0.f);
+  clipPlayer_.setSampleRate(sampleRate_);
+  clipPlayer_.setTempo(transport_.tempo());
 }
 
 bool AudioEngine::open(const AudioConfig& config, std::string& error) {
@@ -56,6 +59,9 @@ bool AudioEngine::start() {
   midiPlayer_.setSampleRate(sampleRate_);
   midiPlayer_.setTempo(transport_.tempo());
   midiPlayer_.reset();
+  clipPlayer_.setSampleRate(sampleRate_);
+  clipPlayer_.setTempo(transport_.tempo());
+  clipPlayer_.reset();
   lastProcessPosition_ = 0;
   snapshot_.clear();
 
@@ -181,6 +187,148 @@ void AudioEngine::clearScore() {
   setScore(std::vector<dsp::MidiNote>());
 }
 
+void AudioEngine::setClips(std::vector<dsp::PlaybackClip> clips,
+                           std::vector<float> storage) {
+  const int c = clipPublishSlot_;
+  clipPublishSlot_ = (clipPublishSlot_ + 1) % 3;
+  ClipSlot& slot = clipSlots_[c];
+  while (slot.refs.load(std::memory_order_acquire) != 0)
+    std::this_thread::yield();
+
+  // The clip's sample pointers target the incoming `storage`; record offsets
+  // before the move, then rebase onto the slot's own storage.
+  const float* base = storage.empty() ? nullptr : storage.data();
+  std::vector<uintptr_t> offsets;
+  offsets.reserve(clips.size());
+  for (const dsp::PlaybackClip& cl : clips) {
+    const uintptr_t off =
+        cl.samples ? static_cast<uintptr_t>(cl.samples - base) : 0;
+    offsets.push_back(off);
+  }
+
+  slot.storage = std::move(storage);
+  slot.clips = std::move(clips);
+  if (!slot.storage.empty()) {
+    for (size_t i = 0; i < slot.clips.size(); ++i)
+      if (slot.clips[i].samples)
+        slot.clips[i].samples = slot.storage.data() + offsets[i];
+  }
+  std::atomic_thread_fence(std::memory_order_release);
+  liveClipSlot_.store(c, std::memory_order_release);
+}
+
+void AudioEngine::clearClips() {
+  setClips(std::vector<dsp::PlaybackClip>(), std::vector<float>());
+}
+
+void AudioEngine::startRecord() {
+  // Allocate outside the real-time thread; the audio thread only writes.
+  recordBuffer_.assign(static_cast<size_t>(kMaxRecordFrames), 0.f);
+  recordWritePos_ = 0;
+  recordingFrames_.store(0, std::memory_order_relaxed);
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::Record);
+  m.f0 = 1.f;
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
+void AudioEngine::stopRecord() {
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::Record);
+  m.f0 = 0.f;
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+  // Wait for the audio thread to drain the stop control (a few ms at most).
+  // With no live stream (headless/offline use) the caller drains controls
+  // explicitly, so don't block.
+  if (!isRunning())
+    return;
+  for (int i = 0; i < 200 && recordingActive_.load(std::memory_order_acquire);
+       ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+}
+
+bool AudioEngine::isRecording() const noexcept {
+  return recordingActive_.load(std::memory_order_acquire);
+}
+
+bool AudioEngine::takeRecordedSamples(std::vector<float>& out,
+                                      uint32_t& sampleRate,
+                                      uint32_t& channels) noexcept {
+  if (recordingActive_.load(std::memory_order_acquire))
+    return false; // still live
+  const uint64_t n =
+      recordingFrames_.load(std::memory_order_acquire);
+  if (n == 0)
+    return false;
+  out.assign(recordBuffer_.begin(),
+             recordBuffer_.begin() + static_cast<ptrdiff_t>(n));
+  sampleRate = static_cast<uint32_t>(sampleRate_);
+  channels = 1;
+  return true;
+}
+
+bool AudioEngine::renderToWav(const std::string& path, double fromBeats,
+                              double toBeats, uint32_t channels,
+                              std::string& err) {
+  if (channels != 1 && channels != 2) {
+    err = "export supports 1 or 2 channels";
+    return false;
+  }
+  if (isRunning()) {
+    err = "stop the audio stream before rendering offline";
+    return false;
+  }
+  if (!(fromBeats >= 0.0) || !(toBeats > fromBeats)) {
+    err = "invalid render range";
+    return false;
+  }
+  drainControls(); // settle any control backlog we care about
+
+  const double sr = sampleRate_;
+  const double fpb = transport_.framesPerBeat();
+  const uint64_t f0 = static_cast<uint64_t>(fromBeats * fpb + 0.5);
+  const uint64_t f1 = static_cast<uint64_t>(toBeats * fpb + 0.5);
+  const uint64_t totalFrames = f1 - f0;
+
+  const PlayState savedState = state_;
+  const bool savedLoop = transport_.isLooping();
+  transport_.setPosition(f0);
+  transport_.play();
+  state_ = PlayState::Playing;
+  transport_.setLooping(false);
+  metronome_.setTicking(false);
+  metronome_.clearCountIn();
+  countPending_ = false;
+
+  constexpr uint32_t kChunk = 512;
+  std::vector<float> scratch(kChunk * channels, 0.f);
+  std::vector<float> wav(static_cast<size_t>(totalFrames) * channels, 0.f);
+  uint64_t fill = 0;
+  for (uint64_t pos = f0; pos < f1; pos += kChunk) {
+    const uint32_t n =
+        static_cast<uint32_t>(std::min<uint64_t>(kChunk, f1 - pos));
+    std::fill(scratch.begin(), scratch.end(), 0.f);
+    process(nullptr, 0, scratch.data(), channels, n, pos, sr);
+    std::copy_n(scratch.begin(), static_cast<size_t>(n) * channels,
+                wav.begin() + static_cast<ptrdiff_t>(fill));
+    fill += static_cast<uint64_t>(n) * channels;
+  }
+
+  const bool ok = misuc::audio::writeWavSamples(
+      path, wav.data(), totalFrames, channels, sr,
+      /*pcm16=*/false, err);
+
+  state_ = savedState;
+  transport_.pause();
+  transport_.setLooping(savedLoop);
+  metronome_.setTicking(metronomeEnabled_);
+  snapshot_.playing.store(state_ == PlayState::Playing,
+                          std::memory_order_relaxed);
+  return ok;
+}
+
 void AudioEngine::previewNote(double freq, float velocity) {
   ControlMessage m;
   m.type = static_cast<uint32_t>(ControlKind::PreviewNote);
@@ -262,6 +410,7 @@ void AudioEngine::drainControls() noexcept {
         metronome_.setTempo(m.d0);
         groove_.setTempo(m.d0);
         midiPlayer_.setTempo(m.d0);
+        clipPlayer_.setTempo(m.d0);
         break;
       case ControlKind::Metronome:
         metronomeEnabled_ = m.f0 > 0.f;
@@ -296,6 +445,20 @@ void AudioEngine::drainControls() noexcept {
               static_cast<uint64_t>(m.d0 * fpb),
               static_cast<uint64_t>(m.d1 * fpb));
         }
+        break;
+      }
+      case ControlKind::Record: {
+        const bool on = m.f0 > 0.f;
+        recording_ = on;
+        if (on) {
+          recordWritePos_ = 0;
+          recordingFrames_.store(0, std::memory_order_release);
+        } else {
+          recordingFrames_.store(recordWritePos_, std::memory_order_release);
+        }
+        // Release-store after all sample writes so the consumer that sees
+        // inactive also sees the final captured bytes.
+        recordingActive_.store(on, std::memory_order_release);
         break;
       }
     }
@@ -343,6 +506,7 @@ void AudioEngine::process(const float* input, uint32_t inputChannels,
     groove_.setSampleRate(sampleRate);
     tone_.setSampleRate(sampleRate);
     midiPlayer_.setSampleRate(sampleRate);
+    clipPlayer_.setSampleRate(sampleRate);
     meterL_.setSampleRate(static_cast<float>(sampleRate));
     meterR_.setSampleRate(static_cast<float>(sampleRate));
     inMeter_.setSampleRate(static_cast<float>(sampleRate));
@@ -376,6 +540,23 @@ void AudioEngine::process(const float* input, uint32_t inputChannels,
   snapshot_.inPeak.store(inMeter_.peak(), std::memory_order_relaxed);
   snapshot_.inRms.store(inMeter_.rms(), std::memory_order_relaxed);
   snapshot_.inClipped.store(inMeter_.clipped(), std::memory_order_relaxed);
+
+  // Audio input recording: capture to a mono ring only while armed and the
+  // transport is playing. The buffer is preallocated on the control thread so
+  // this path never allocates or blocks.
+  if (recording_ && state_ == PlayState::Playing && input != nullptr &&
+      inputChannels > 0 && !recordBuffer_.empty()) {
+    const uint64_t room =
+        kMaxRecordFrames - std::min<uint64_t>(recordWritePos_, kMaxRecordFrames);
+    const uint32_t take = static_cast<uint32_t>(std::min<uint64_t>(frames, room));
+    for (uint32_t i = 0; i < take; ++i) {
+      const float l = input[i * inputChannels];
+      const float r = inputChannels > 1 ? input[i * inputChannels + 1] : l;
+      recordBuffer_[recordWritePos_ + i] = 0.5f * (l + r);
+    }
+    recordWritePos_ += take;
+    recordingFrames_.store(recordWritePos_, std::memory_order_release);
+  }
 
   const uint64_t songPos = transport_.positionFrames(); // block-start position
 
@@ -430,6 +611,24 @@ void AudioEngine::process(const float* input, uint32_t inputChannels,
     }
     if (slot >= 0)
       scoreSlots_[slot].refs.fetch_sub(1, std::memory_order_release);
+
+    // Audio clips (decoded regions placed on the timeline), only while playing.
+    const int cslot = liveClipSlot_.load(std::memory_order_acquire);
+    const bool includeClips = state_ == PlayState::Playing && cslot >= 0;
+    ClipSlot* cs = cslot >= 0 ? &clipSlots_[cslot] : nullptr;
+    if (cs)
+      cs->refs.fetch_add(1, std::memory_order_relaxed);
+    if (cs && includeClips) {
+      if (outputChannels >= 2) {
+        clipPlayer_.render(cs->clips, &output[0], &output[1], frames,
+                           outputChannels, songPos);
+      } else {
+        clipPlayer_.render(cs->clips, &output[0], &output[0], frames,
+                           outputChannels, songPos);
+      }
+    }
+    if (cs)
+      cs->refs.fetch_sub(1, std::memory_order_release);
   }
 
   if (testTone_)

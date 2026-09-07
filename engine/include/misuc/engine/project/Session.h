@@ -19,14 +19,35 @@ struct NoteEvent {
   bool operator==(const NoteEvent&) const = default;
 };
 
-// A track holds a set of note events plus mixer-ish state. Notes are currently
-// the whole editable region; clip/arrangement layout arrives later.
+// An audio region on a track's timeline, backed by a sound file on disk.
+// Timeline quantities (start, duration, offset, fades) are in beats to match
+// the note model; the engine resamples the source to the project rate on
+// playback. `sourceFile` is the persistent reference to the audio asset; the
+// session serializes it verbatim so projects keep working after a reload.
+struct AudioClip {
+  std::string id;
+  std::string name;
+  std::string sourceFile;      // path to the WAV (or FLAC/Ogg) asset
+  double startBeats = 0.0;     // placement on the timeline
+  double durationBeats = 1.0;  // region length on the timeline
+  double clipOffsetBeats = 0.0; // trim-in offset into the source (beats)
+  float gainDb = 0.0f;
+  double fadeInBeats = 0.0;
+  double fadeOutBeats = 0.0;
+  uint32_t sampleRate = 0;     // source metadata from import/record
+  uint16_t channels = 0;
+
+  bool operator==(const AudioClip&) const = default;
+};
+
+// A track holds note events, audio clips, and mixer-ish state.
 struct Track {
   std::string id;
   std::string name;
   bool muted = false;
   float gainDb = 0.0f;
   std::vector<NoteEvent> notes;
+  std::vector<AudioClip> clips;
 
   bool operator==(const Track&) const = default;
 };
@@ -74,6 +95,10 @@ public:
   Track* findTrack(const std::string& id);
   const Track* findTrack(const std::string& id) const;
 
+  // Adds an audio clip to the given track and returns its stable id. The clip
+  // id is generated here (ignoring any caller-set id) so it stays unique.
+  std::string addClip(const std::string& trackId, AudioClip clip);
+
   // Serialize to .misuc text.
   std::string toJson() const;
 
@@ -82,6 +107,7 @@ public:
 
 private:
   std::string newTrackId();
+  std::string newClipId();
 
   std::string name_ = "Untitled";
   double tempo_ = 120.0;
@@ -93,6 +119,7 @@ private:
   double loopEndBeats_ = 4.0;
   std::vector<Track> tracks_;
   uint32_t trackCounter_ = 0;
+  uint32_t clipCounter_ = 0;
 };
 
 } // namespace misuc::project

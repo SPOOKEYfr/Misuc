@@ -124,6 +124,23 @@ this queue at the top of each audio callback and applies changes.
   the transport-quantized groove, master-gain and monitor-gain smoothing
   (one-pole coefficient 0.004), mixes monitored input into the output bus, and
   produces L/R output + input `MeterSnapshot`s.
+  - **Per-track mixer stage** (`MixerTrackParam`: gainDb, pan, mute, solo):
+    notes and clips enter per-track staging buffers, then each track passes
+    through a smoothed gain fader and a constant-power `dsp::panLaw` (centre =
+    0.707 per channel) into a common output bus. Separate `Smoother`s are
+    created per track on construction (coefficient 0.004, gain reset 1.0,
+    panL/panR 0.707106781), so mixer edits land sample-accurately without
+    re-scanning notes or re-publishing scores.
+  - Any-solo gating: a track is audible iff `!mute && (!anySolo || solo)`.
+    Per-track meters measure **post-gain, pre-mute/solo** signal (the real
+    audible level) and are polled through non-blocking atomics
+    (`trackMeterPeakL/R`, `trackMeterRmsL/R`, `trackMeterClipped`);
+    `kMaxTrackCount = 32`. The per-track section of `process()` runs in
+    `kMaxBlockFrames = 8192` chunks so huge offline/export blocks never
+    allocate on the audio thread. Export (`renderToWav`) flows through the same
+    live `process()` path, so the bounce honors the mixer exactly.
+  - `publishMixer(...)` / `clearMixer()` carry the mixer params through the
+    existing lock-free control queue from the UI thread.
 
 > Known wrinkle (to be cleaned up if sanitizers flag it): `setMasterGainDb`,
 > `setTestTone` and `setMonitorGainDb` also mutate fields directly on the UI
@@ -141,10 +158,15 @@ this queue at the top of each audio callback and applies changes.
   beats, sample rate, channels); the field is optional so version-1
   documents (no tracks) and v2 documents without clips still load.
 - `MidiScore.h` / `ClipScore.h` — `buildMidiScore(Session, score)` flattens a
-  session into a sorted playback score (mute filtering, per-track gain +
-  velocity baked into amplitude); `buildClipScore(Session, clips)` sorts
-  active unmuted clips by start beat and bounds them against a time horizon.
-  The UI publishes both through `AudioEngine::setScore` / `setClips`.
+  session into a sorted playback score; `buildClipScore(Session, clips)` sorts
+  active clips by start beat and bounds them against a time horizon. Notes and
+  clips carry the id of their source track and a **raw** amplitude only
+  (`MidiNote.gain` = velocity/127, `PlaybackClip.gain` = clip gain); track
+  gain/pan/mute/solo are applied by the engine's mixer stage, not baked into
+  the score. The UI publishes both through `AudioEngine::setScore`/`setClips`;
+  the slots partition arrivals into per-track vectors on the publisher thread
+  (`setClips` moves the sample storage in and rebases pointers, which is
+  identity because a `std::vector` move preserves the allocation address).
 
 ## UI (`ui/`)
 
@@ -221,6 +243,35 @@ gestures emit `PianoRoll::audition(freq, velocity)` (add / drag / click),
   choices, shows latency, toggles the 440 Hz test tone and the groove beat,
   controls master and monitor gain, and shows live output/input meters with
   clip LEDs.
+- **Mixer** page (`ui/src/mixer/`) — the real mixer panel: one `ChannelStrip`
+  per track (color dot, pan `Knob` −100…+100, M/S buttons, vertical stereo
+  `VerticalMeter` with RMS fill / peak-hold cap / clip LED, dB `Fader` −60…+12
+  with wheel fine-tune and double-click-to-0, plus a gain readout) and a Master
+  strip (fader + stereo meter) at the right. Strips are plain views over the
+  shared Session: user edits become session mutations via `edited()` and land on
+  the same undo stack as every other edit. `syncToEngine()` re-publishes the
+  track mixer params (`publishMixer`) from every session change, and
+  `pollMeters()` (on the main window's 30 Hz tick) pulls the per-track physics
+  from the engine atomics. Track selection is mirrored both ways between the
+  editor's track list and the strips. The `MixerPage` rebuilds its rack when the
+  track set changes and otherwise only mirrors values, so a fader drag is never
+  interrupted.
+- **Appearance** page (`ui/src/theme/ThemePage.{h,cpp}`) — presets, custom
+  accent, glass toggle, Save/Load `.misuctheme`, all applied live through the
+  theme engine.
+- **Theme engine** (`ui/src/theme/ThemeEngine.{h,cpp}`) — owns the `theme::k*`
+  token set (mutable inline `QColor` globals, so API call sites are unchanged),
+  provides eight factory presets, recomputes derived accent tokens on a custom
+  accent, builds the app palette + stylesheet, persists the choice via
+  `QSettings`, and round-trips `.misuctheme` files. `apply(QApplication&)`
+  emits `themeChanged()` so live widgets (like the nav-logo) restyle.
+- **Branding** (`ui/src/branding/Logo.{h,cpp}`) — shared vector logo (a gold
+  MIDI note whose stem blooms into a flame) painted in `QPainter`; the nav-rail
+  mark and window icon draw from the active theme accent at runtime, while the
+  on-disk icon set is regenerated from the same code by `tools/rendericons.cpp`
+  into hicolor PNGs (16–256 px) plus a bundled `:/icons/misuc-256.png`. A
+  `.desktop` entry and `cmake install` rules stage the app, entry, and icon
+  theme into the standard `share/` locations.
 
 The UI talks only to `AudioEngine` (and through it the backend interface); it
 never touches PipeWire directly.
@@ -238,6 +289,9 @@ AudioEngine::process (AudioRenderer; input + output)
         │  triple-buffer snapshot published by the UI on every edit)
         │  + ClipPlayer sidechain (audio-clip slots from AudioEngine::setClips)
         │  + wall-clock preview notes (audition; independent of transport)
+        │  per-track mixer stage: smoothed gain → constant-power pan →
+        │  mute/solo (anySolo) gating → common bus; track meters (post-gain,
+        │  pre-gate) via atomics
         │  monitored input → monitor gain smoother → output bus
         │  master-gain smoothing
         │  gather output + input MeterSnapshot

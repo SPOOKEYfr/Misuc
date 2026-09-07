@@ -307,6 +307,81 @@ be refined as development proceeds.
   velocity. Edge grips get a resize cursor and hi-lite handles. (Harness 166
   checks.)
 
+## Phase 9 — Real mixer: engine + panel (done)
+
+- **Engine** (`AudioEngine`, `audio/MidiScore.h`, `audio/ClipScore.h`,
+  `dsp/Midi.{h,cpp}`, `dsp/ClipPlayer.h`): every track now flows through its
+  own mixer stage on the audio thread. Notes and clips carry the id of the
+  track they belong to; the scorers no longer bake track gain or skip muted
+  tracks — they emit raw pitches/clips plus a per-track amplitude. The engine
+  applies gain/pan/mute/solo per track at render time from a lock-free
+  published `publishMixer(std::vector<MixerTrackParam>)` (gainDb, pan, mute,
+  solo), with sample-accurate smoothed faders, a constant-power `dsp::panLaw`
+  (centre = 0.707 per channel), and `anySolo` gating: a track is audible iff
+  `!mute && (!anySolo || solo)`.
+- Score/clip slots store per-track vectors partitioned on the publisher thread;
+  `setClips` moves the sample storage into the slot and rebases pointers
+  (identity, since a `std::vector` move preserves the allocation address).
+  `kMaxTrackCount = 32`; `process()` renders the per-track section in 8192-frame
+  chunks so the large offline/export blocks stay allocation-free.
+- **Per-track output metering**: the meter measures post-gain (fader + pan),
+  pre-mute/solo-gated signal, exposed as non-blocking atomics
+  (`trackMeterPeakL/R`, `trackMeterRmsL/R`, `trackMeterClipped`). The master bus
+  and meters are unchanged; `renderToWav` shares the live `process()` path so
+  exports honor the mixer exactly.
+- **UI mixer panel** (`ui/src/mixer/`): a real Mixer page with one `ChannelStrip`
+  per track — color dot, pan `Knob` (−100…+100, drag/wheel/double-click-centre),
+  M/S buttons, a vertical stereo `VerticalMeter` (RMS fill, peak-hold cap, clip
+  LED), and a dB `Fader` (−60…+12, wheel fine-tune, double-click → 0 dB) plus a
+  gain readout — a dedicated Master strip (fader + stereo meter) on the right.
+  Strips mirror the Session; edits report up through `edited()` into the same
+  undo stack as every other edit, and `syncToEngine()` re-publishes the mixer
+  params whenever the session changes (edit, undo/redo, open, new). `pollMeters()`
+  runs on the existing 30 Hz UI tick from the engine atomics. Track selection
+  is mirrored both ways between the editor list and the strips.
+- Theme center landed under the same phase boundary (see Phase 10).
+- All verification green: unit `tests/test_mixer.cpp` (+5 cases: per-track gain
+  independence, hard-pan L/centre/R, solo + multi-solo windows, mute gates but
+  keeps its meter, export honors the mixer), full engine suite 54127 checks / 0
+  failures; the UI harness grew to 197 checks (mixer strips mirror the session,
+  strip edits land in the session and are undoable, strip activation mirrors
+  selection into the editor list, master fader + readout, meter polls, theme
+  preset/custom-accent/`.misuctheme` round-trip, glass toggle notification,
+  nav-logo pixmap).
+
+## Phase 10 — Central theme engine + appearance page (done)
+
+- `theme::k*` tokens are now mutable inline globals owned by
+  `ui/src/theme/ThemeEngine.{h,cpp}`; every existing call site is unchanged.
+- Eight factory presets (Misuc Graphite, Midnight Blue, Violet Studio, Electric
+  Cyan, Crimson Studio, Emerald Studio, Amber Studio, OLED Black); a custom
+  accent sets the preset name to "Custom" and recomputes the derived tokens
+  (`accentSoft = blend(panel, accent, 48)`) so buttons, sliders and the mixer
+  stay legible. An optional glass layer with an opaque fallback
+  (`glassPanelStyle`) drives the translucent mixer strips.
+- `apply(QApplication&)` sets the Fusion palette + app stylesheet and emits
+  `themeChanged()` (suppressed on the first apply). Choices persist via
+  `QSettings` (`theme/preset`, `theme/accent`); `.misuctheme` files round-trip
+  as indented JSON for sharing.
+- New **Appearance** page (`ui/src/theme/ThemePage.{h,cpp}`) in the nav rail:
+  preset combo, accent color picker with live swatch, glass toggle, and
+  Save/Load `.misuctheme`, with a live preview panel — all edits re-apply and
+  persist instantly.
+
+## Phase 11 — Branding + Linux desktop integration (done)
+
+- Vector logo (`ui/src/branding/Logo.{h,cpp}`): a gold MIDI note whose stem
+  blooms into a coral flame, painted with `QPainter`; the nav-rail brand mark
+  and window icon draw from the **active theme accent** at runtime.
+- `tools/rendericons.cpp` regenerates the on-disk hicolor icon set (16–256 px)
+  plus the bundled app icon (`ui/resources.qrc` → `:/icons/misuc-256.png`) —
+  the app loads the real generated PNGs.
+- Desktop integration: `assets/desktop/misuc.desktop` (validated with
+  `desktop-file-validate`) + `cmake --install` stages the binary, the entry,
+  and the hicolor icon set into `share/…` (verified with a `DESTDIR` strip).
+- Harness checks the nav logo pixmap and the full theme round-trip; app smoke,
+  engine suite and harness all green.
+
 ## Phase 8+ — Beyond
 
 - VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU

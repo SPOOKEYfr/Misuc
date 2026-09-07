@@ -91,6 +91,47 @@ TEST_CASE(midi_playback_lifecycle) {
   std::printf("  midi playback peak %.3f\n", engine.meterPeakL());
 }
 
+// Phase 7: note audition must sound through the wall-clock preview path even
+// while the transport is stopped, with no score set. Daemon-gated.
+TEST_CASE(midi_preview_lifecycle) {
+  AudioEngine engine(std::make_unique<PipeWireBackend>());
+  AudioConfig cfg;
+  std::string err;
+  if (!engine.open(cfg, err)) {
+    std::printf("  (no audio daemon; skipped)\n");
+    return;
+  }
+  engine.setGroove(false);
+  const bool started = engine.start();
+  TEST_ASSERT(started);
+  if (!started) {
+    engine.closeAudio();
+    return;
+  }
+  engine.play(false); // audible baseline, ensures the stream is really running
+  std::this_thread::sleep_for(std::chrono::milliseconds(300));
+  const float quietPeak =
+      std::max(engine.meterPeakL(), engine.meterPeakR());
+  engine.stop();
+  engine.previewNote(misuc::dsp::midiNoteToFreq(69), 0.9f);
+  engine.previewNote(misuc::dsp::midiNoteToFreq(72), 0.9f);
+  // The device quantum (~8k frames at 48k) leaves ~170 ms between callbacks,
+  // so poll finely across several quanta for the preview to drain and be
+  // metered before the meter's fast decay drops the snapshot.
+  float previewPeak = 0.f;
+  for (int i = 0; i < 400 && previewPeak < 0.05f; ++i) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    previewPeak = std::max(std::max(engine.meterPeakL(), engine.meterPeakR()),
+                           previewPeak);
+  }
+  engine.stop();
+  engine.closeAudio();
+  TEST_ASSERT(!engine.isRunning());
+  TEST_ASSERT(previewPeak > 0.01f); // audible while stopped, no score
+  TEST_ASSERT(previewPeak > quietPeak);
+  std::printf("  preview peak %.3f (quiet %.3f)\n", previewPeak, quietPeak);
+}
+
 // Phase 3: groove must produce audible output while the transport plays, and
 // the engine must survive enabling/disabling it plus input capture config.
 // Daemon-gated like the other live tests.

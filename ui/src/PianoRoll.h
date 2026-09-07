@@ -16,6 +16,7 @@ class PianoRuler : public QWidget {
 public:
   explicit PianoRuler(QWidget* parent = nullptr);
   void setHorizon(double numBeats, int pxPerBeat, int barBeats, int hbar);
+  void setPlayheadBeat(double beats, bool visible);
 
 protected:
   void paintEvent(QPaintEvent* event) override;
@@ -25,6 +26,8 @@ private:
   int pxPerBeat_ = 40;
   int barBeats_ = 4;
   int hbar_ = 0;
+  double playheadBeats_ = -1.0;
+  bool playheadVisible_ = false;
 };
 
 // Piano-key column left of the canvas; scrolls vertically with it.
@@ -60,6 +63,8 @@ public:
   void setTrack(const QString& id);
   QString trackId() const { return trackId_; }
   void refresh(); // repaint from the session
+  void setPlayhead(bool playing, double beats);
+  void autoFollow(bool playing, double beats);
 
   void setZoom(double pxPerBeat);
   double zoom() const { return pxPerBeat_; }
@@ -76,6 +81,9 @@ public:
 
 signals:
   void edited();
+  // Audition feedback: freq in Hz, velocity 0..1. Emitted as notes are added,
+  // dragged, or clicked so the UI can preview them even while stopped.
+  void audition(double freq, float velocity);
 
 protected:
   void paintEvent(QPaintEvent* e) override;
@@ -102,6 +110,8 @@ private:
   bool snap_ = true;
   int hbarValue_ = 0;
   int vbarValue_ = 0;
+  double playheadBeats_ = -1.0;
+  bool playheadPlaying_ = false;
 };
 
 } // namespace misuc::ui

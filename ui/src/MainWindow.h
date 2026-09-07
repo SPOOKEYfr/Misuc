@@ -39,6 +39,7 @@ private:
   void buildMenus();
   void buildPages();
   void poll();
+  void feedPlayhead();
   void onSessionEdited();
 
   void newProject();

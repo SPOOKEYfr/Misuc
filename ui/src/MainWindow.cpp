@@ -27,6 +27,7 @@
 #include "StatusPanel.h"
 #include "Theme.h"
 #include "TransportBar.h"
+#include "PianoRoll.h"
 
 namespace misuc::ui {
 
@@ -155,6 +156,10 @@ void MainWindow::buildPages() {
           &MainWindow::onSessionEdited);
   connect(editorPage_, &EditorPage::edited, this,
           &MainWindow::onSessionEdited);
+
+  // Note audition: preview the pitch immediately, even while stopped.
+  connect(editorPage_->piano(), &PianoRoll::audition, this,
+          [this](double freq, float vel) { engine_.previewNote(freq, vel); });
 }
 
 void MainWindow::onSessionEdited() {
@@ -176,6 +181,19 @@ void MainWindow::rebuildMidiScore() {
 void MainWindow::poll() {
   transport_->refresh();
   status_->refresh();
+  feedPlayhead();
+}
+
+void MainWindow::feedPlayhead() {
+  // Transport position (frames) -> beats via current tempo, and drive the
+  // piano-roll caret with auto-follow from the same 30 Hz UI tick.
+  const double bpm = session_.tempo();
+  if (bpm <= 0.0)
+    return;
+  const uint64_t frames = engine_.playheadSamples();
+  const double beats =
+      static_cast<double>(frames) / ((60.0 / bpm) * engine_.sampleRate());
+  editorPage_->piano()->setPlayhead(engine_.isTransportPlaying(), beats);
 }
 
 void MainWindow::paintEvent(QPaintEvent*) {

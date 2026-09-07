@@ -14,6 +14,7 @@ enum class ControlKind : uint32_t {
   MasterGain  = 5, // f0 = linear gain
   Groove      = 6, // f0 = enabled(0/1)
   MonitorGain = 7, // f0 = linear gain applied to input monitoring
+  PreviewNote = 8, // d0 = freq, f0 = velocity gain (audition a note now)
 };
 
 struct alignas(8) ControlMessage {

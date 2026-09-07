@@ -127,7 +127,28 @@ be refined as development proceeds.
   tempo scaling, and score mapping; a live daemon test confirms MIDI-alone
   playback is audible. Suite: 53989 checks, 0 failures.
 
-## Phase 7+ — Beyond
+## Phase 7 — Playhead caret & note audition (done)
+
+- Transport playhead in the piano roll: the 30 Hz UI tick converts the engine's
+  playhead frames to beats and drives a green caret that scrolls the timeline
+  (auto-follow) while playing; drawn on both ruler and note canvas.
+- Note audition: `AudioEngine::previewNote(freq, velocity)` feeds a new
+  `ControlKind::PreviewNote` control into the real-time queue; the MIDI player
+  renders it on a **wall-clock** timebase (a frame counter that advances in
+  every process block), so preview notes sound even while the transport is
+  stopped, and coexist/track with the score.
+- The piano roll emits `audition()` as notes are added, dragged, or clicked;
+  the main window forwards the pitch to the engine.
+- Fixes surfaced by this work: the player's incremental scan broke block
+  rendering (silent notes) — added a shared note-synthesis helper and frame-
+  based envelopes; previews now render even with no score slot live.
+- New unit tests: preview on the wall clock with no score, decay after
+  duration, frequency matches, score+preview phase-add, preview ring
+  overwriting; live stopped-preview audible test. Full suite remains green:
+  54003 checks, 0 failures. Offscreen UI harness verifies the caret render and
+  audition signals (37 checks).
+
+## Phase 8+ — Beyond
 
 - VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU
   acceleration for the UI when it pays off.

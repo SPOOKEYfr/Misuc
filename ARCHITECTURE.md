@@ -74,6 +74,11 @@ this queue at the top of each audio callback and applies changes.
   block as a pure function of absolute sample time. No persistent voice state,
   so blocks stitch seamlessly and stop/rewind/loop restart cleanly with zero
   allocation on the audio thread.
+- `Midi.h` (playhead preview) — the player renders two timebases: the **song**
+  timebase (score, locked to the transport; only when `includeScore`) and the
+  **wall** timebase (a monotonic frame clock) on which short audition notes
+  (`triggerPreview`) sound even while the transport is stopped. A fixed 8-slot
+  ring of previews absorbs flood triggers by overwriting the oldest.
 
 ### transport
 
@@ -144,6 +149,12 @@ bar, sidebars, status area, and content pages.
   (double-click adds, drag moves, right-click / Del deletes, Ctrl+wheel zooms,
   snap 1/16 toggle) mutate the session directly and emit `edited()` so the
   main window pushes one undo snapshot per gesture.
+- **Editor** page (Phase 7): the main window's 30 Hz `poll()` feeds the
+  transport playhead (frames → beats via tempo) to the piano roll, which draws
+  a green caret on ruler + canvas and auto-follows it while playing. Note
+  gestures emit `PianoRoll::audition(freq, velocity)` (add / drag / click),
+  forwarded to `AudioEngine::previewNote` so notes make sound immediately —
+  even while the transport is stopped.
 - **Audio Settings** page drives the live engine: it lists devices (output and
   input) from `PipeWireBackend::enumerateDevices`, offers sample-rate/buffer
   choices, shows latency, toggles the 440 Hz test tone and the groove beat,
@@ -168,6 +179,7 @@ AudioEngine::process (AudioRenderer; input + output)
         │  count-in metronome / test tone / groove (transport-quantized)
         │  MIDI score player (stateless re-synthesis from a real-time-safe
         │  triple-buffer snapshot published by the UI on every edit)
+        │  + wall-clock preview notes (audition; independent of transport)
         │  monitored input → monitor gain smoother → output bus
         │  master-gain smoothing
         │  gather output + input MeterSnapshot

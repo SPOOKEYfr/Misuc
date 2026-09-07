@@ -171,6 +171,15 @@ void AudioEngine::clearScore() {
   setScore(std::vector<dsp::MidiNote>());
 }
 
+void AudioEngine::previewNote(double freq, float velocity) {
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::PreviewNote);
+  m.d0 = freq;
+  m.f0 = std::clamp(velocity, 0.f, 1.f);
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
 bool AudioEngine::isTransportPlaying() const noexcept {
   return snapshot_.playing.load(std::memory_order_relaxed);
 }
@@ -264,6 +273,10 @@ void AudioEngine::drainControls() noexcept {
       case ControlKind::MasterGain:
         masterSmoother_.setTarget(m.f0);
         break;
+      case ControlKind::PreviewNote:
+        midiPlayer_.triggerPreview(static_cast<double>(wallFrames_),
+                                   0.35 * sampleRate_, m.d0, m.f0);
+        break;
     }
   }
 }
@@ -343,8 +356,10 @@ void AudioEngine::process(const float* input, uint32_t inputChannels,
   snapshot_.inRms.store(inMeter_.rms(), std::memory_order_relaxed);
   snapshot_.inClipped.store(inMeter_.clipped(), std::memory_order_relaxed);
 
+  const uint64_t songPos = transport_.positionFrames(); // block-start position
+
   if (state_ == PlayState::Playing) {
-    const uint64_t startPos = transport_.positionFrames();
+    const uint64_t startPos = songPos;
     transport_.advance(frames);
     metronome_.setTicking(metronomeEnabled_);
     if (outputChannels >= 2) {
@@ -353,19 +368,6 @@ void AudioEngine::process(const float* input, uint32_t inputChannels,
     } else {
       metronome_.render(&output[0], &output[0], frames, outputChannels);
       groove_.render(&output[0], &output[0], frames, outputChannels, startPos);
-    }
-    const int slot = liveSlot_.load(std::memory_order_acquire);
-    if (slot >= 0) {
-      ScoreSlot& scoreSlot = scoreSlots_[slot];
-      scoreSlot.refs.fetch_add(1, std::memory_order_relaxed);
-      if (outputChannels >= 2) {
-        midiPlayer_.render(scoreSlot.notes, &output[0], &output[1], frames,
-                           outputChannels, startPos);
-      } else {
-        midiPlayer_.render(scoreSlot.notes, &output[0], &output[0], frames,
-                           outputChannels, startPos);
-      }
-      scoreSlot.refs.fetch_sub(1, std::memory_order_release);
     }
     if (countPending_ && metronome_.countInComplete()) {
       metronome_.clearCountIn();
@@ -383,6 +385,30 @@ void AudioEngine::process(const float* input, uint32_t inputChannels,
       transport_.play();
       snapshot_.playing.store(true, std::memory_order_relaxed);
     }
+  }
+
+// MIDI score (only while playing) + audition previews (wall clock, always).
+  // Runs in every state so note previews sound even when the transport is
+  // stopped; the score slot is held only for the duration of the render.
+  static const std::vector<dsp::MidiNote> kNoScore;
+  {
+    const uint64_t wall0 = wallFrames_;
+    wallFrames_ = wall0 + frames; // wall clock advances regardless of play
+    const int slot = liveSlot_.load(std::memory_order_acquire);
+    const bool includeScore = state_ == PlayState::Playing && slot >= 0;
+    const std::vector<dsp::MidiNote>& score =
+        slot >= 0 ? scoreSlots_[slot].notes : kNoScore;
+    if (slot >= 0)
+      scoreSlots_[slot].refs.fetch_add(1, std::memory_order_relaxed);
+    if (outputChannels >= 2) {
+      midiPlayer_.render(score, includeScore, &output[0], &output[1], frames,
+                         outputChannels, songPos, wall0);
+    } else {
+      midiPlayer_.render(score, includeScore, &output[0], &output[0], frames,
+                         outputChannels, songPos, wall0);
+    }
+    if (slot >= 0)
+      scoreSlots_[slot].refs.fetch_sub(1, std::memory_order_release);
   }
 
   if (testTone_)

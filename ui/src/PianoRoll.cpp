@@ -14,6 +14,8 @@
 
 #include "Theme.h"
 
+#include <misuc/engine/dsp/Midi.h>
+
 using misuc::project::NoteEvent;
 using misuc::project::Track;
 
@@ -50,6 +52,12 @@ QString pitchLabel(int pitch) {
 PianoRuler::PianoRuler(QWidget* parent) : QWidget(parent) {
   setFixedHeight(PianoRoll::kRulerH);
   setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+}
+
+void PianoRuler::setPlayheadBeat(double beats, bool visible) {
+  playheadBeats_ = beats;
+  playheadVisible_ = visible;
+  update();
 }
 
 void PianoRuler::setHorizon(double numBeats, int pxPerBeat, int barBeats,
@@ -96,6 +104,15 @@ void PianoRuler::paintEvent(QPaintEvent*) {
       const double x = barX + beat * px;
       p.setPen(QPen(theme::kBorder, 1));
       p.drawLine(QPointF(x, height() - 8), QPointF(x, height() - 1));
+    }
+  }
+
+  // Playhead caret aligned with the canvas line below.
+  if (playheadVisible_ && playheadBeats_ >= 0.0) {
+    const double cx = playheadBeats_ * px - hbar_;
+    if (cx >= -1.0 && cx <= width() + 1.0) {
+      p.setPen(QPen(theme::kOk, 2));
+      p.drawLine(QPointF(cx, 2), QPointF(cx, height() - 1));
     }
   }
 }
@@ -175,6 +192,12 @@ public:
     return std::round(beat / kSnapBeats) * kSnapBeats;
   }
 
+  void setPlayheadBeat(double beats, bool visible) {
+    playheadBeats_ = beats;
+    playheadVisible_ = visible;
+    update();
+  }
+
   const Track* track() const { return owner_->session_.findTrack(owner_->trackId_.toStdString()); }
   Track* trackEdit();
 
@@ -209,6 +232,8 @@ public:
     t->notes.push_back(n);
     selected_ = idx;
     update();
+    owner_->audition(misuc::dsp::midiNoteToFreq(static_cast<double>(pitch)),
+                    100.0f / 127.0f);
   }
 
   void deleteNote(int index) {
@@ -228,6 +253,8 @@ public:
   int dragOffsetPitch_ = 0;
   double grabBeat_ = 0.0;
   int grabPitch_ = 0;
+  double playheadBeats_ = -1.0;
+  bool playheadVisible_ = false;
 
 protected:
   void paintEvent(QPaintEvent*) override {
@@ -274,6 +301,15 @@ protected:
                     1));
       p.drawRoundedRect(r.adjusted(0, 0, -1, -1), 2, 2);
     }
+
+    // Playhead caret, drawn above the notes so it stays visible.
+    if (playheadVisible_ && playheadBeats_ >= 0.0) {
+      const double cx = beatToX(playheadBeats_);
+      if (cx >= -1.0 && cx <= width() + 1.0) {
+        p.setPen(QPen(theme::kOk, 2));
+        p.drawLine(QPointF(cx, 0), QPointF(cx, height()));
+      }
+    }
   }
 
   void mousePressEvent(QMouseEvent* e) override {
@@ -292,6 +328,8 @@ protected:
         dragOffsetPitch_ = grabPitch_ - static_cast<int>(n.pitch);
         dragging_ = true;
         dragged_ = false;
+        owner_->audition(misuc::dsp::midiNoteToFreq(static_cast<double>(n.pitch)),
+                         n.velocity / 127.0f);
       } else {
         selected_ = -1;
         dragging_ = false;
@@ -325,6 +363,9 @@ protected:
       n.startBeats = newStart;
       n.pitch = static_cast<uint8_t>(newPitch);
       dragged_ = true;
+      owner_->audition(
+          misuc::dsp::midiNoteToFreq(static_cast<double>(n.pitch)),
+          n.velocity / 127.0f);
     }
     update();
   }
@@ -432,13 +473,45 @@ void PianoRoll::setTrack(const QString& id) {
   refresh();
 }
 
+void PianoRoll::setPlayhead(bool playing, double beats) {
+  playheadPlaying_ = playing;
+  playheadBeats_ = beats;
+  refresh();
+  autoFollow(playing, beats);
+}
+
 void PianoRoll::refresh() {
   const int barBeats = session_.timeSigNumerator();
   ruler_->setHorizon(kHorizonBeats, static_cast<int>(pxPerBeat_), barBeats,
                      hbarValue_);
+  ruler_->setPlayheadBeat(playheadBeats_, playheadBeats_ >= 0.0);
   keys_->setRange(kLowPitch, kRowH, vbarValue_);
-  if (canvas_)
+  if (canvas_) {
+    canvas_->setPlayheadBeat(playheadBeats_, playheadBeats_ >= 0.0);
     canvas_->update();
+  }
+}
+
+void PianoRoll::autoFollow(bool playing, double beats) {
+  if (!canvas_ || !scroller_ || beats < 0.0)
+    return;
+  const int viewX = scroller_->viewport()->width();
+  const int docW = canvas_->width();
+  if (docW <= 0)
+    return;
+  const double cx = beats * pxPerBeat_;
+  const int cur = hbar_->value();
+  if (playing) {
+    // Keep the caret inside the visible window while the transport runs.
+    if (cx < cur || cx > cur + viewX)
+      hbar_->setValue(std::clamp(static_cast<int>(cx - viewX * 0.1), 0,
+                                 std::max(0, docW - viewX)));
+  } else if (beats >= 0.0 && !playing) {
+    // Manual scrub: bring the caret into view if it is off-screen.
+    if (cx < cur || cx > cur + viewX)
+      hbar_->setValue(std::clamp(static_cast<int>(cx), 0,
+                                 std::max(0, docW - viewX)));
+  }
 }
 
 void PianoRoll::setZoom(double px) {

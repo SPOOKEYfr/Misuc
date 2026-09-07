@@ -26,6 +26,9 @@ public:
   // Repopulate list + repaint piano roll (called after open/undo/redo/new).
   void refresh();
 
+  // The active piano roll, so the main window can wire audition + playhead.
+  PianoRoll* piano() const { return piano_; }
+
 signals:
   void edited();
 

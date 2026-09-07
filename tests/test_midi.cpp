@@ -23,12 +23,14 @@ constexpr double kFpb120 = (60.0 / 120.0) * kSr; // 24000 frames/beat @120bpm
 
 std::vector<float> renderRange(MidiPlayer& p,
                                const std::vector<MidiNote>& score,
-                               uint64_t startFrame, uint32_t frames) {
+                               uint64_t startFrame, uint32_t frames,
+                               uint64_t wallFrame = 0) {
   std::vector<float> buf(frames, 0.f);
   p.setSampleRate(kSr);
   p.setTempo(120.0);
   // stride = 1 for mono readability; player adds to outL with outR==outL.
-  p.render(score, buf.data(), buf.data(), frames, 1, startFrame);
+  p.render(score, true, buf.data(), buf.data(), frames, 1, startFrame,
+           wallFrame);
   return buf;
 }
 
@@ -158,14 +160,129 @@ TEST_CASE(midi_player_respects_tempo) {
   p120.setSampleRate(kSr);
   p120.setTempo(120.0);
   std::vector<float> buf120(256, 0.f);
-  p120.render(score, buf120.data(), buf120.data(), 256, 1, beat1At120);
+  p120.render(score, true, buf120.data(), buf120.data(), 256, 1,
+              beat1At120, 0);
 
   MidiPlayer p60;
   p60.setSampleRate(kSr);
   p60.setTempo(60.0);
   std::vector<float> buf60(256, 0.f);
-  p60.render(score, buf60.data(), buf60.data(), 256, 1, beat1At120);
+  p60.render(score, true, buf60.data(), buf60.data(), 256, 1,
+             beat1At120, 0);
 
   TEST_ASSERT(peak(buf120) > 1e-3f);            // 120bpm: beat 1 already here
   TEST_ASSERT(peak(buf60) < 1e-9f);             // 60bpm: beat 1 is later
+}
+
+TEST_CASE(midi_preview_sounds_on_wall_clock) {
+  // Audition notes play on the wall timebase even with no score and while the
+  // transport would be stopped (includeScore=false).
+  MidiPlayer p;
+  p.setSampleRate(kSr);
+  p.setTempo(120.0);
+  p.triggerPreview(1000.0, 0.35 * kSr, 440.0, 1.f);
+
+  std::vector<float> buf(4096, 0.f);
+  p.render(std::vector<MidiNote>{}, false, buf.data(), buf.data(), 4096, 1, 0,
+           0);
+
+  float before = 0.f;
+  for (size_t i = 0; i < 1000; ++i)
+    before = std::max(before, std::fabs(buf[i]));
+  const float after = peak(buf);
+  TEST_ASSERT(before < 1e-9f); // silent until the preview starts
+  TEST_ASSERT(after > 1e-2f);
+}
+
+TEST_CASE(midi_preview_decays_after_duration) {
+  MidiPlayer p;
+  p.setSampleRate(kSr);
+  p.setTempo(120.0);
+  const double dur = 0.35 * kSr; // 16800 frames
+  p.triggerPreview(0.0, dur, 440.0, 1.f);
+
+  // Render well past the note end + release => must be silent again.
+  std::vector<float> buf(8192, 0.f);
+  p.render(std::vector<MidiNote>{}, false, buf.data(), buf.data(), 8192, 1, 0,
+           38000);
+  TEST_ASSERT(peak(buf) < 1e-6f);
+}
+
+TEST_CASE(midi_preview_frequency_matches) {
+  // A preview at 2x the frequency must cross zero at ~2x the rate.
+  const auto crossings = [](double srNow, double freq) {
+    MidiPlayer p;
+    p.setSampleRate(srNow);
+    p.setTempo(120.0);
+    p.triggerPreview(0.0, srNow, freq, 1.f);
+    std::vector<float> buf(static_cast<size_t>(srNow), 0.f);
+    p.render(std::vector<MidiNote>{}, false, buf.data(), buf.data(),
+             static_cast<uint32_t>(srNow), 1, 0, 0);
+    int n = 0;
+    for (size_t i = 12000; i + 1 < 36000; ++i)
+      if ((buf[i] > 0.f && buf[i + 1] <= 0.f) ||
+          (buf[i] < 0.f && buf[i + 1] >= 0.f))
+        ++n;
+    return n;
+  };
+  const int c440 = crossings(kSr, 440.0);
+  const int c880 = crossings(kSr, 880.0);
+  TEST_ASSERT(c440 > 400);
+  TEST_ASSERT(c880 > c440);
+  const double ratio = static_cast<double>(c880) / c440;
+  TEST_ASSERT(ratio > 1.4 && ratio < 2.8);
+}
+
+TEST_CASE(midi_score_and_preview_add) {
+  // Same pitch in both timebases at overlapping times lands in phase, so the
+  // combined energy is ~4x a lone note in the steady region.
+  const std::vector<MidiNote> score{{0.0, 4.0, 220.0, 1.f}};
+
+  MidiPlayer alone;
+  alone.setSampleRate(kSr);
+  alone.setTempo(120.0);
+  std::vector<float> a(16000, 0.f);
+  alone.render(score, true, a.data(), a.data(), 16000, 1, 0, 0);
+
+  MidiPlayer both;
+  both.setSampleRate(kSr);
+  both.setTempo(120.0);
+  both.triggerPreview(0.0, 0.35 * kSr, 220.0, 1.f);
+  std::vector<float> b(16000, 0.f);
+  both.render(score, true, b.data(), b.data(), 16000, 1, 0, 0);
+
+  const auto en = [](const std::vector<float>& v, size_t from, size_t to) {
+    double s = 0.0;
+    for (size_t i = from; i < to; ++i)
+      s += static_cast<double>(v[i]) * v[i];
+    return s;
+  };
+  const double ea = en(a, 4000, 12000);
+  const double eb = en(b, 4000, 12000);
+  TEST_ASSERT(ea > 1e-4);
+  TEST_ASSERT(eb > 3.0 * ea);
+}
+
+TEST_CASE(midi_preview_ring_overwrites_oldest) {
+  // The preview ring holds kPreviewSlots notes; pushing one more than the ring
+  // size evicts the oldest, which here is identical, so the energy of a 9th
+  // push equals that of exactly 8 pushes.
+  const auto renderPushed = [](int pushes) {
+    MidiPlayer p;
+    p.setSampleRate(kSr);
+    p.setTempo(120.0);
+    for (int i = 0; i < pushes; ++i)
+      p.triggerPreview(0.0, 0.35 * kSr, 220.0, 1.f);
+    std::vector<float> buf(8192, 0.f);
+    p.render(std::vector<MidiNote>{}, false, buf.data(), buf.data(), 8192, 1,
+             0, 0);
+    double s = 0.0;
+    for (float v : buf)
+      s += static_cast<double>(v) * v;
+    return s;
+  };
+  const double e8 = renderPushed(8);
+  const double e9 = renderPushed(9);
+  TEST_ASSERT(e8 > 1e-4);
+  TEST_ASSERT(std::fabs(e9 - e8) < e8 * 1e-6);
 }

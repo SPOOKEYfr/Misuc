@@ -56,9 +56,15 @@ public:
   void setScore(std::vector<dsp::MidiNote> notes);
   void clearScore();
 
+  // Audition a note immediately (freq in Hz, velocity 0..1 as amplitude).
+  // Sounds via the MIDI player's wall-clock preview path, even when the
+  // transport is stopped.
+  void previewNote(double freq, float velocity);
+
   // UI poll snapshots (loads atomics).
   bool isTransportPlaying() const noexcept;
   uint64_t playheadSamples() const noexcept;
+  double sampleRate() const noexcept { return sampleRate_; }
   float meterPeakL() const noexcept;
   float meterPeakR() const noexcept;
   float meterRmsL() const noexcept;
@@ -122,6 +128,10 @@ private:
   std::atomic<int> liveSlot_{-1};
   int publishSlot_ = 0;
   dsp::MidiPlayer midiPlayer_;
+
+  // Monotonic wall-clock frame counter (independent of transport) used for
+  // note audition previews; incremented every process() block.
+  uint64_t wallFrames_ = 0;
 
   uint64_t lastProcessPosition_ = 0;
 };

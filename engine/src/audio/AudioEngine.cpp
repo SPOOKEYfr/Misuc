@@ -27,6 +27,19 @@ AudioEngine::AudioEngine(std::unique_ptr<AudioBackend> backend)
   setMonitorGainDb(0.f);
   clipPlayer_.setSampleRate(sampleRate_);
   clipPlayer_.setTempo(transport_.tempo());
+  for (uint32_t i = 0; i < kMaxTrackCount; ++i) {
+    MixerTrackRT& rt = rtTracks_[i];
+    rt.gain.setCoefficient(0.004f);
+    rt.panL.setCoefficient(0.004f);
+    rt.panR.setCoefficient(0.004f);
+    rt.gain.reset(1.f);
+    rt.panL.reset(0.707106781f); // constant-power centre
+    rt.panR.reset(0.707106781f);
+    rt.meterL.setSampleRate(static_cast<float>(sampleRate_));
+    rt.meterR.setSampleRate(static_cast<float>(sampleRate_));
+    rt.meterL.setDecaySeconds(0.35f, 0.30f);
+    rt.meterR.setDecaySeconds(0.35f, 0.30f);
+  }
 }
 
 bool AudioEngine::open(const AudioConfig& config, std::string& error) {
@@ -64,6 +77,21 @@ bool AudioEngine::start() {
   clipPlayer_.reset();
   lastProcessPosition_ = 0;
   snapshot_.clear();
+  for (uint32_t i = 0; i < kMaxTrackCount; ++i) {
+    MixerTrackRT& rt = rtTracks_[i];
+    rt.meterL.clearClip();
+    rt.meterR.clearClip();
+    rt.gain.reset(1.f);
+    rt.panL.reset(0.707106781f);
+    rt.panR.reset(0.707106781f);
+    rt.mute = false;
+    rt.solo = false;
+    trackPeakL_[i].store(0.f, std::memory_order_relaxed);
+    trackPeakR_[i].store(0.f, std::memory_order_relaxed);
+    trackRmsL_[i].store(0.f, std::memory_order_relaxed);
+    trackRmsR_[i].store(0.f, std::memory_order_relaxed);
+    trackClipped_[i].store(false, std::memory_order_relaxed);
+  }
 
   const bool ok = backend_->start(*this);
   if (!ok)
@@ -178,7 +206,13 @@ void AudioEngine::setScore(std::vector<dsp::MidiNote> notes) {
   // block, so this spin is bounded and effectively never waits.
   while (slot.refs.load(std::memory_order_acquire) != 0)
     std::this_thread::yield();
-  slot.notes = std::move(notes);
+  // Pre-split into per-track vectors so the audio thread can mix one track
+  // without any real-time allocation.
+  std::vector<std::vector<dsp::MidiNote>> byTrack(kMaxTrackCount);
+  for (dsp::MidiNote& n : notes)
+    if (n.track < kMaxTrackCount)
+      byTrack[n.track].push_back(std::move(n));
+  slot.tracks = std::move(byTrack);
   std::atomic_thread_fence(std::memory_order_release);
   liveSlot_.store(c, std::memory_order_release);
 }
@@ -195,30 +229,45 @@ void AudioEngine::setClips(std::vector<dsp::PlaybackClip> clips,
   while (slot.refs.load(std::memory_order_acquire) != 0)
     std::this_thread::yield();
 
-  // The clip's sample pointers target the incoming `storage`; record offsets
-  // before the move, then rebase onto the slot's own storage.
-  const float* base = storage.empty() ? nullptr : storage.data();
-  std::vector<uintptr_t> offsets;
-  offsets.reserve(clips.size());
-  for (const dsp::PlaybackClip& cl : clips) {
-    const uintptr_t off =
-        cl.samples ? static_cast<uintptr_t>(cl.samples - base) : 0;
-    offsets.push_back(off);
-  }
-
+  // The clip's sample pointers target the incoming `storage`; move ownership
+  // first (the buffer address is unchanged by the move), rebase explicitly,
+  // then re-split by track for the mixer. Reviewer note: sample pointers stay
+  // valid because a vector move hands the same heap allocation to the slot.
   slot.storage = std::move(storage);
-  slot.clips = std::move(clips);
-  if (!slot.storage.empty()) {
-    for (size_t i = 0; i < slot.clips.size(); ++i)
-      if (slot.clips[i].samples)
-        slot.clips[i].samples = slot.storage.data() + offsets[i];
+  const float* base = slot.storage.empty() ? nullptr : slot.storage.data();
+  std::vector<std::vector<dsp::PlaybackClip>> byTrack(kMaxTrackCount);
+  for (dsp::PlaybackClip& cl : clips) {
+    if (cl.track >= kMaxTrackCount)
+      continue;
+    if (cl.samples && base)
+      cl.samples =
+          base + static_cast<ptrdiff_t>(cl.samples - slot.storage.data());
+    byTrack[cl.track].push_back(std::move(cl));
   }
+  slot.tracks = std::move(byTrack);
   std::atomic_thread_fence(std::memory_order_release);
   liveClipSlot_.store(c, std::memory_order_release);
 }
 
 void AudioEngine::clearClips() {
   setClips(std::vector<dsp::PlaybackClip>(), std::vector<float>());
+}
+
+void AudioEngine::publishMixer(std::vector<MixerTrackParam> params) {
+  if (params.size() > kMaxTrackCount)
+    params.resize(kMaxTrackCount);
+  const int c = mixerPublishSlot_;
+  mixerPublishSlot_ = (mixerPublishSlot_ + 1) % 3;
+  MixerSlot& slot = mixerSlots_[c];
+  while (slot.refs.load(std::memory_order_acquire) != 0)
+    std::this_thread::yield();
+  slot.params = std::move(params);
+  std::atomic_thread_fence(std::memory_order_release);
+  liveMixerSlot_.store(c, std::memory_order_release);
+}
+
+void AudioEngine::clearMixer() {
+  publishMixer(std::vector<MixerTrackParam>());
 }
 
 void AudioEngine::startRecord() {
@@ -374,6 +423,31 @@ uint64_t AudioEngine::xruns() const noexcept {
   return snapshot_.xruns.load(std::memory_order_relaxed);
 }
 
+float AudioEngine::trackMeterPeakL(uint32_t idx) const noexcept {
+  return idx < kMaxTrackCount
+             ? trackPeakL_[idx].load(std::memory_order_relaxed)
+             : 0.f;
+}
+float AudioEngine::trackMeterPeakR(uint32_t idx) const noexcept {
+  return idx < kMaxTrackCount
+             ? trackPeakR_[idx].load(std::memory_order_relaxed)
+             : 0.f;
+}
+float AudioEngine::trackMeterRmsL(uint32_t idx) const noexcept {
+  return idx < kMaxTrackCount
+             ? trackRmsL_[idx].load(std::memory_order_relaxed)
+             : 0.f;
+}
+float AudioEngine::trackMeterRmsR(uint32_t idx) const noexcept {
+  return idx < kMaxTrackCount
+             ? trackRmsR_[idx].load(std::memory_order_relaxed)
+             : 0.f;
+}
+bool AudioEngine::trackMeterClipped(uint32_t idx) const noexcept {
+  return idx < kMaxTrackCount &&
+         trackClipped_[idx].load(std::memory_order_relaxed);
+}
+
 void AudioEngine::drainControls() noexcept {
   ControlMessage m;
   while (controlQueue_->pop(m)) {
@@ -513,6 +587,13 @@ void AudioEngine::process(const float* input, uint32_t inputChannels,
     meterL_.setDecaySeconds(0.35f, 0.30f);
     meterR_.setDecaySeconds(0.35f, 0.30f);
     inMeter_.setDecaySeconds(0.35f, 0.30f);
+    for (uint32_t i = 0; i < kMaxTrackCount; ++i) {
+      MixerTrackRT& rt = rtTracks_[i];
+      rt.meterL.setSampleRate(static_cast<float>(sampleRate));
+      rt.meterR.setSampleRate(static_cast<float>(sampleRate));
+      rt.meterL.setDecaySeconds(0.35f, 0.30f);
+      rt.meterR.setDecaySeconds(0.35f, 0.30f);
+    }
   }
   (void)framePosition;
 
@@ -589,46 +670,118 @@ void AudioEngine::process(const float* input, uint32_t inputChannels,
     }
   }
 
-// MIDI score (only while playing) + audition previews (wall clock, always).
-  // Runs in every state so note previews sound even when the transport is
-  // stopped; the score slot is held only for the duration of the render.
-  static const std::vector<dsp::MidiNote> kNoScore;
+// Per-track mix: render each track's MIDI notes and audio clips into its own
+  // fixed stereo scratch, apply smoothed fader gain + constant-power pan, meter
+  // the post-gain signal, then gate by mute/solo (any-solo logic) and sum onto
+  // the output. Runs in every state so note previews still sound while stopped;
+  // the score/clip/mixer slots are held only for the block.
   {
     const uint64_t wall0 = wallFrames_;
     wallFrames_ = wall0 + frames; // wall clock advances regardless of play
     const int slot = liveSlot_.load(std::memory_order_acquire);
-    const bool includeScore = state_ == PlayState::Playing && slot >= 0;
-    const std::vector<dsp::MidiNote>& score =
-        slot >= 0 ? scoreSlots_[slot].notes : kNoScore;
-    if (slot >= 0)
-      scoreSlots_[slot].refs.fetch_add(1, std::memory_order_relaxed);
-    if (outputChannels >= 2) {
-      midiPlayer_.render(score, includeScore, &output[0], &output[1], frames,
-                         outputChannels, songPos, wall0);
-    } else {
-      midiPlayer_.render(score, includeScore, &output[0], &output[0], frames,
-                         outputChannels, songPos, wall0);
-    }
-    if (slot >= 0)
-      scoreSlots_[slot].refs.fetch_sub(1, std::memory_order_release);
-
-    // Audio clips (decoded regions placed on the timeline), only while playing.
     const int cslot = liveClipSlot_.load(std::memory_order_acquire);
+    const bool includeScore = state_ == PlayState::Playing && slot >= 0;
     const bool includeClips = state_ == PlayState::Playing && cslot >= 0;
-    ClipSlot* cs = cslot >= 0 ? &clipSlots_[cslot] : nullptr;
+    ScoreSlot* const ss = slot >= 0 ? &scoreSlots_[slot] : nullptr;
+    ClipSlot* const cs = cslot >= 0 ? &clipSlots_[cslot] : nullptr;
+    if (ss)
+      ss->refs.fetch_add(1, std::memory_order_relaxed);
     if (cs)
       cs->refs.fetch_add(1, std::memory_order_relaxed);
-    if (cs && includeClips) {
-      if (outputChannels >= 2) {
-        clipPlayer_.render(cs->clips, &output[0], &output[1], frames,
-                           outputChannels, songPos);
-      } else {
-        clipPlayer_.render(cs->clips, &output[0], &output[0], frames,
-                           outputChannels, songPos);
+
+    // Fold published mixer params into the per-track smoothing/gating targets.
+    // The slot holds a small fixed-size array we copy out, so the hold is short.
+    const int ms = liveMixerSlot_.load(std::memory_order_acquire);
+    bool anySolo = false;
+    if (ms >= 0) {
+      MixerSlot& mslot = mixerSlots_[ms];
+      mslot.refs.fetch_add(1, std::memory_order_relaxed);
+      for (uint32_t t = 0; t < kMaxTrackCount; ++t) {
+        MixerTrackRT& rt = rtTracks_[t];
+        const MixerTrackParam* p =
+            t < mslot.params.size() ? &mslot.params[t] : nullptr;
+        rt.gain.setTarget(p ? dsp::gainFromDb(p->gainDb) : 1.f);
+        const auto [gl, gr] = p ? dsp::panLaw(p->pan) : dsp::panLaw(0.f);
+        rt.panL.setTarget(gl);
+        rt.panR.setTarget(gr);
+        rt.mute = p && p->mute;
+        rt.solo = p && p->solo;
+        anySolo = anySolo || rt.solo;
+      }
+      mslot.refs.fetch_sub(1, std::memory_order_release);
+    }
+
+    for (uint32_t base = 0; base < frames; base += kMaxBlockFrames) {
+      const uint32_t seg = std::min(kMaxBlockFrames, frames - base);
+      const uint64_t segPos = songPos + base;
+      for (uint32_t t = 0; t < kMaxTrackCount; ++t) {
+        float* const sL = &scratchL_[t * kMaxBlockFrames];
+        float* const sR = &scratchR_[t * kMaxBlockFrames];
+        std::fill(sL, sL + seg, 0.f);
+        std::fill(sR, sR + seg, 0.f);
+        MixerTrackRT& rt = rtTracks_[t];
+        const bool hasScore = ss && includeScore && t < ss->tracks.size() &&
+                              !ss->tracks[t].empty();
+        const bool hasClips = cs && includeClips && t < cs->tracks.size() &&
+                              !cs->tracks[t].empty();
+        if (hasScore) {
+          if (outputChannels >= 2)
+            midiPlayer_.renderScore(ss->tracks[t], true, sL, sR, seg, 2,
+                                    segPos);
+          else
+            midiPlayer_.renderScore(ss->tracks[t], true, sL, sL, seg, 1,
+                                    segPos);
+        }
+        if (hasClips) {
+          if (outputChannels >= 2)
+            clipPlayer_.render(cs->tracks[t], sL, sR, seg, 2, segPos);
+          else
+            clipPlayer_.render(cs->tracks[t], sL, sL, seg, 1, segPos);
+        }
+        // Smoothed fader + pan (constant power) applied in place per sample.
+        for (uint32_t n = 0; n < seg; ++n) {
+          const float g = rt.gain.tick();
+          const float gl = rt.panL.tick();
+          const float gr = rt.panR.tick();
+          sL[n] *= g * gl;
+          sR[n] *= g * gr;
+        }
+        // Meter the real post-gain signal (independent of mute/solo gating).
+        rt.meterL.process(sL, seg);
+        rt.meterR.process(sR, seg);
+        trackPeakL_[t].store(rt.meterL.peak(), std::memory_order_relaxed);
+        trackPeakR_[t].store(rt.meterR.peak(), std::memory_order_relaxed);
+        trackRmsL_[t].store(rt.meterL.rms(), std::memory_order_relaxed);
+        trackRmsR_[t].store(rt.meterR.rms(), std::memory_order_relaxed);
+        trackClipped_[t].store(rt.meterL.clipped() || rt.meterR.clipped(),
+                               std::memory_order_relaxed);
+        const bool audible = !rt.mute && (!anySolo || rt.solo);
+        if (audible) {
+          if (outputChannels >= 2) {
+            for (uint32_t n = 0; n < seg; ++n) {
+              output[(base + n) * outputChannels] += sL[n];
+              output[(base + n) * outputChannels + 1] += sR[n];
+            }
+          } else {
+            for (uint32_t n = 0; n < seg; ++n)
+              output[base + n] += 0.5f * (sL[n] + sR[n]);
+          }
+        }
       }
     }
     if (cs)
       cs->refs.fetch_sub(1, std::memory_order_release);
+    if (ss)
+      ss->refs.fetch_sub(1, std::memory_order_release);
+
+    // Audition previews render once on the wall clock (never per-track, so the
+    // mix can't duplicate them).
+    if (outputChannels >= 2)
+      midiPlayer_.renderPreviews(&output[0], &output[1], frames, outputChannels,
+                                 wall0);
+    else
+      midiPlayer_.renderPreviews(&output[0], &output[0], frames, outputChannels,
+                                 wall0);
   }
 
   if (testTone_)

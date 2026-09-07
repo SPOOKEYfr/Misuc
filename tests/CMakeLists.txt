@@ -9,6 +9,7 @@ add_executable(misuc_tests
   test_logger.cpp
   test_undo.cpp
   test_clips.cpp
+  test_mixer.cpp
   test_audio.cpp)
 
 target_link_libraries(misuc_tests PRIVATE misuc_engine)

@@ -27,10 +27,12 @@ inline bool buildClipScore(const misuc::project::Session& session,
   storage.clear();
   err.clear();
 
+  size_t trackIndex = 0;
   for (const misuc::project::Track& t : session.tracks()) {
-    if (t.muted || t.clips.empty())
+    if (t.clips.empty()) {
+      ++trackIndex;
       continue;
-    const float trackGain = std::clamp(dsp::gainFromDb(t.gainDb), 0.f, 8.f);
+    }
     for (const misuc::project::AudioClip& c : t.clips) {
       if (c.sourceFile.empty() || c.durationBeats <= 0.0)
         continue;
@@ -51,9 +53,10 @@ inline bool buildClipScore(const misuc::project::Session& session,
       pc.startBeats = c.startBeats;
       pc.offsetBeats = c.clipOffsetBeats;
       pc.durationBeats = c.durationBeats;
-      pc.gain = trackGain * std::clamp(dsp::gainFromDb(c.gainDb), 0.f, 8.f);
+      pc.gain = std::clamp(dsp::gainFromDb(c.gainDb), 0.f, 8.f);
       pc.fadeInBeats = c.fadeInBeats;
       pc.fadeOutBeats = c.fadeOutBeats;
+      pc.track = static_cast<uint32_t>(trackIndex);
 
       // Copy this clip's channels*frames interleaved samples into storage.
       const size_t first = storage.size();
@@ -64,6 +67,7 @@ inline bool buildClipScore(const misuc::project::Session& session,
       pc.samples = storage.data() + first;
       clips.push_back(pc);
     }
+    ++trackIndex;
   }
 
   std::sort(clips.begin(), clips.end(),

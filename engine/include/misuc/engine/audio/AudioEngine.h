@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <array>
 #include <condition_variable>
 #include <cstdint>
 #include <memory>
@@ -22,6 +23,17 @@ namespace misuc::engine {
 
 // Engine play states. Transport may be playing while the metronome counts in.
 enum class PlayState : uint8_t { Stopped = 0, Counting = 1, Playing = 2 };
+
+// Real-time-safe per-track mixer parameters published by the UI thread. The
+// audio thread applies smoothed gain, constant-power pan, and mute/solo gating
+// per track at render time, so mixer changes land without re-scanning notes or
+// clips (and without touching the real-time allocation budget).
+struct MixerTrackParam {
+  float gainDb = 0.0f; // -60..+12 (interpreted as linear gain)
+  float pan = 0.0f;    // -1 = left, 0 = centre, +1 = right
+  bool mute = false;
+  bool solo = false;
+};
 
 // The audio engine owns the transport, metronome, device test tone and master
 // bus metering. It runs the real-time process loop through the backend. The UI
@@ -52,6 +64,13 @@ public:
   void setMonitorGainDb(float db);
   // Loop region in beats (applied on the audio thread as transport frames).
   void setLoop(bool enabled, double startBeats, double endBeats);
+
+  // Publish per-track mixer parameters (gain/pan/mute/solo) from any non-RT
+  // thread. Applied by the audio thread via the same real-time-safe triple
+  // buffer as the score/clips. A shorter vector keeps the remaining tracks at
+  // their defaults (0 dB, centre, unmuted, un-soloed).
+  void publishMixer(std::vector<MixerTrackParam> params);
+  void clearMixer(); // reset every track to the default mixer state
 
   // Publish a fresh MIDI playback score from any non-RT thread (e.g. when the
   // user edits notes). Handed to the audio thread via a real-time-safe
@@ -108,6 +127,15 @@ public:
   bool inMeterClipped() const noexcept;
   uint64_t xruns() const noexcept;
 
+  // Per-track post-gain meter snapshots (post pan + fader, before mute/solo
+  // gating) polled by the mixer UI. Loads atomics on the caller's thread.
+  float trackMeterPeakL(uint32_t idx) const noexcept;
+  float trackMeterPeakR(uint32_t idx) const noexcept;
+  float trackMeterRmsL(uint32_t idx) const noexcept;
+  float trackMeterRmsR(uint32_t idx) const noexcept;
+  bool trackMeterClipped(uint32_t idx) const noexcept;
+  static constexpr uint32_t kMaxTrackCount = 32;
+
   Transport& transport() noexcept { return transport_; }
   const Transport& transport() const noexcept { return transport_; }
 
@@ -152,9 +180,11 @@ private:
 
   // MIDI playback score + stateless polyphonic player. The audio thread holds
   // at most one slot (refs + 1) per block; the publisher round-robins three
-  // slots and only writes a slot once its readers have left.
+  // slots and only writes a slot once its readers have left. Each slot stores
+  // the score pre-split by track (partitioned on the publisher thread) so the
+  // mixer can render a single track without touching the real-time path.
   struct ScoreSlot {
-    std::vector<dsp::MidiNote> notes;
+    std::vector<std::vector<dsp::MidiNote>> tracks;
     std::atomic<int> refs{0};
   };
   ScoreSlot scoreSlots_[3];
@@ -163,17 +193,51 @@ private:
   dsp::MidiPlayer midiPlayer_;
 
   // Audio clip playback slots, mirroring the score slots: the publisher fills
-  // a free slot (owning the decoded samples in `storage`), the audio thread
-  // holds at most one slot per block.
+  // a free slot (owning the decoded samples in `storage`; clips re-split by
+  // track), the audio thread holds at most one slot per block.
   struct ClipSlot {
     std::vector<float> storage;
-    std::vector<dsp::PlaybackClip> clips;
+    std::vector<std::vector<dsp::PlaybackClip>> tracks;
     std::atomic<int> refs{0};
   };
   ClipSlot clipSlots_[3];
   std::atomic<int> liveClipSlot_{-1};
   int clipPublishSlot_ = 0;
   dsp::ClipPlayer clipPlayer_;
+
+  // Per-track mixer state, audio-thread owned. Push-through smoothing avoids
+  // zipper noise on fader/pan changes; the UI never touches these.
+  static constexpr uint32_t kMaxBlockFrames = 8192;
+  struct MixerTrackRT {
+    core::Smoother gain; // linear gain target (from gainDb)
+    core::Smoother panL; // constant-power left coefficient
+    core::Smoother panR; // constant-power right coefficient
+    dsp::ChannelMeter meterL;
+    dsp::ChannelMeter meterR;
+    bool mute = false;
+    bool solo = false;
+  };
+  std::array<MixerTrackRT, kMaxTrackCount> rtTracks_{};
+
+  // Per-track mixer slot triple buffer (published params, applied each block).
+  struct MixerSlot {
+    std::vector<MixerTrackParam> params;
+    std::atomic<int> refs{0};
+  };
+  MixerSlot mixerSlots_[3];
+  std::atomic<int> liveMixerSlot_{-1};
+  int mixerPublishSlot_ = 0;
+
+  // Per-track post-gain meter snapshots (audio thread stores, UI loads).
+  std::array<std::atomic<float>, kMaxTrackCount> trackPeakL_{};
+  std::array<std::atomic<float>, kMaxTrackCount> trackPeakR_{};
+  std::array<std::atomic<float>, kMaxTrackCount> trackRmsL_{};
+  std::array<std::atomic<float>, kMaxTrackCount> trackRmsR_{};
+  std::array<std::atomic<bool>, kMaxTrackCount> trackClipped_{};
+
+  // Fixed per-track stereo staging buffers for the block being mixed.
+  float scratchL_[kMaxTrackCount * kMaxBlockFrames];
+  float scratchR_[kMaxTrackCount * kMaxBlockFrames];
 
   // Audio input recording state (audio-thread owned once armed). Linear input
   // capture into a fixed buffer allocated on the control thread; the audio

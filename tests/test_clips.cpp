@@ -208,10 +208,9 @@ TEST_CASE(build_clip_score_decodes) {
   TEST_ASSERT(std::fabs(pc.sampleRate - 48000.0) < 1.0);
   TEST_ASSERT(pc.startBeats == 1.0);
   TEST_ASSERT(pc.durationBeats == 2.0);
-  // -6 dB track + +2 dB clip => ~ -4 dB = ~0.63 linear (clamped well within).
-  const float expectedGain =
-      misuc::dsp::gainFromDb(-6.0f) * misuc::dsp::gainFromDb(2.0f);
-  TEST_ASSERT(std::fabs(pc.gain - expectedGain) < 1e-4f);
+  // Only the clip's own gain is baked now; track gain is applied by the mixer.
+  TEST_ASSERT(std::fabs(pc.gain - misuc::dsp::gainFromDb(2.0f)) < 1e-4f);
+  TEST_ASSERT(pc.track == 0);
   // Samples reference the shared storage buffer and carry the tone amplitude.
   TEST_ASSERT(peak(storage, 1000, 4000) > 0.4f);
 }

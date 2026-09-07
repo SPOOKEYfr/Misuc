@@ -127,7 +127,7 @@ TEST_CASE(midi_score_build_mapping) {
   const std::string mutedId = s.addTrack("Silent");
   Track* lead = s.findTrack(id);
   Track* silent = s.findTrack(mutedId);
-  lead->gainDb = 6.f; // +6 dB -> gain 2.0
+  lead->gainDb = 6.f; // +6 dB -> applied by the engine mixer, not baked here
   lead->notes.push_back(NoteEvent{0, 60, 127, 0.0, 1.0});
   lead->notes.push_back(NoteEvent{0, 60, 64, 0.5, 0.5});
   silent->muted = true;
@@ -135,13 +135,34 @@ TEST_CASE(midi_score_build_mapping) {
 
   std::vector<MidiNote> score;
   buildMidiScore(s, score);
-  TEST_ASSERT(score.size() == 2); // muted track excluded
-  TEST_ASSERT(std::fabs(midiNoteToFreq(60) - score[0].freq) < 1e-6);
-  TEST_ASSERT(score[0].startBeats < score[1].startBeats); // sorted
-  // Track gain +6 dB (1.995) is baked into every note with velocity scaling.
-  const float db6 = misuc::dsp::gainFromDb(6.f);
-  TEST_ASSERT(std::fabs(score[0].gain - (127.f / 127.f) * db6) < 1e-4f);
-  TEST_ASSERT(std::fabs(score[1].gain - (64.f / 127.f) * db6) < 1e-4f);
+  TEST_ASSERT(score.size() == 3); // muted tracks still build (mixer gates them)
+  // Sorted by start beat (std::sort is unstable for ties, so order within a
+  // shared start beat is unspecified).
+  TEST_ASSERT(score[0].startBeats <= score[1].startBeats);
+  TEST_ASSERT(score[1].startBeats <= score[2].startBeats);
+  // Notes carry velocity only; per-track gain is left to the engine mixer.
+  size_t leadNotes = 0, silentNotes = 0;
+  for (const MidiNote& n : score) {
+    if (n.track == 1) {
+      ++silentNotes;
+      TEST_ASSERT(std::fabs(midiNoteToFreq(72) - n.freq) < 1e-6);
+      TEST_ASSERT(std::fabs(n.gain - (127.f / 127.f)) < 1e-4f);
+    } else if (n.track == 0) {
+      ++leadNotes;
+      TEST_ASSERT(std::fabs(midiNoteToFreq(60) - n.freq) < 1e-6);
+    }
+  }
+  TEST_ASSERT(leadNotes == 2);
+  TEST_ASSERT(silentNotes == 1);
+  // The two lead notes carry velocity 127 and 64 respectively.
+  float maxGain = 0.f, minGain = 1.f;
+  for (const MidiNote& n : score)
+    if (n.track == 0) {
+      maxGain = std::max(maxGain, n.gain);
+      minGain = std::min(minGain, n.gain);
+    }
+  TEST_ASSERT(std::fabs(maxGain - 1.f) < 1e-4f);
+  TEST_ASSERT(std::fabs(minGain - (64.f / 127.f)) < 1e-4f);
 }
 
 TEST_CASE(midi_empty_score_silent) {

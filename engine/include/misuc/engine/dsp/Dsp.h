@@ -157,6 +157,15 @@ inline float gainFromDb(float db) noexcept {
   return std::pow(10.f, db / 20.f);
 }
 
+// Constant-power pan law. `pan` in [-1,+1] maps to an angle in [0, PI/2]; the
+// two channel gains square-sum to 1 so centre (-3 dB per channel) is balanced
+// and no direction is louder. Returns (gL, gR).
+inline std::pair<float, float> panLaw(float pan) noexcept {
+  const float p = std::clamp(pan, -1.f, 1.f);
+  const float a = (p + 1.f) * kPi / 4.f;
+  return {std::cos(a), std::sin(a)};
+}
+
 inline float fastFabs(float g) noexcept {
   return std::fabs(g);
 }

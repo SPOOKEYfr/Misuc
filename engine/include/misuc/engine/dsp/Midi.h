@@ -8,14 +8,16 @@
 namespace misuc::dsp {
 
 // A note in the playback score: absolute musical time plus a baked-in
-// amplitude (velocity and per-track gain already applied). The score is an
-// immutable snapshot published by the UI thread; the audio thread only reads
-// it.
+// amplitude of just the note's velocity (per-track gain, pan, mute and solo
+// are applied by the mixer in the audio thread, keyed by `track`). The score
+// is an immutable snapshot published by the UI thread; the audio thread only
+// reads it.
 struct MidiNote {
   double startBeats = 0.0;
   double durationBeats = 1.0;
   double freq = 440.0; // Hz (from MIDI note number)
-  float gain = 0.f;    // amplitude (velocity * track gain)
+  float gain = 0.f;    // amplitude (velocity / 127)
+  uint32_t track = 0;  // owning track index (into the engine mixer array)
 };
 
 inline double midiNoteToFreq(double midiNote) noexcept {
@@ -67,10 +69,21 @@ public:
 
   // Additive render into an interleaved stereo pair (mono if stride < 2).
   // `songFrame` is the transport position in frames at the block start;
-  // `wallFrame` is the equivalent frame count of the wall clock.
+  // `wallFrame` is the equivalent frame count of the wall clock. This
+  // combined entry point renders the score (when `includeScore`) and the
+  // audition preview ring, mixing both into the output — used by the engine
+  // as a convenience and by the unit tests.
   void render(const std::vector<MidiNote>& score, bool includeScore,
               float* outL, float* outR, uint32_t frames, uint32_t stride,
               uint64_t songFrame, uint64_t wallFrame) noexcept {
+    renderScore(score, includeScore, outL, outR, frames, stride, songFrame);
+    renderPreviews(outL, outR, frames, stride, wallFrame);
+  }
+
+  // Render only the score notes (no previews). Used per-track by the mixer.
+  void renderScore(const std::vector<MidiNote>& score, bool includeScore,
+                   float* outL, float* outR, uint32_t frames, uint32_t stride,
+                   uint64_t songFrame) noexcept {
     if (frames == 0 || outL == nullptr)
       return;
     if (outR == nullptr)
@@ -110,8 +123,16 @@ public:
                      kAttack * sampleRate_, tail, n.freq, n.gain);
       }
     }
+  }
 
-    // Short audition previews run on the wall clock regardless of transport.
+  // Render only the short wall-clock audition previews (no score). Called once
+  // by the mixer so previews aren't duplicated across per-track renders.
+  void renderPreviews(float* outL, float* outR, uint32_t frames,
+                      uint32_t stride, uint64_t wallFrame) noexcept {
+    if (frames == 0 || outL == nullptr)
+      return;
+    if (outR == nullptr)
+      outR = outL;
     for (const Preview& p : previews_) {
       if (p.dur <= 0.0 || p.freq <= 0.0 || p.gain <= 0.f)
         continue;

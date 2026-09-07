@@ -84,7 +84,9 @@ std::string Session::toJson() const {
     tobj.emplace("id", Json(t.id));
     tobj.emplace("name", Json(t.name));
     tobj.emplace("muted", Json(t.muted));
+    tobj.emplace("solo", Json(t.solo));
     tobj.emplace("gainDb", Json(static_cast<double>(t.gainDb)));
+    tobj.emplace("pan", Json(static_cast<double>(t.pan)));
 
     Json::Array notes;
     for (const NoteEvent& n : t.notes) {
@@ -173,8 +175,12 @@ Session Session::fromJson(const std::string& text) {
         t.name = v->second.string();
       if (auto v = to.find("muted"); v != to.end() && v->second.isBool())
         t.muted = v->second.boolean();
+      if (auto v = to.find("solo"); v != to.end() && v->second.isBool())
+        t.solo = v->second.boolean();
       if (auto v = to.find("gainDb"); v != to.end() && v->second.isNumber())
         t.gainDb = static_cast<float>(v->second.number());
+      if (auto v = to.find("pan"); v != to.end() && v->second.isNumber())
+        t.pan = static_cast<float>(v->second.number());
 
       if (auto v = to.find("notes"); v != to.end() && v->second.isArray()) {
         for (const Json& nj : v->second.array()) {

@@ -40,12 +40,16 @@ struct AudioClip {
   bool operator==(const AudioClip&) const = default;
 };
 
-// A track holds note events, audio clips, and mixer-ish state.
+// A track holds note events, audio clips, and mixer state. Mixer parameters
+// (gainDb, pan, mute, solo) are model-owned so they can be automated and
+// persisted independently of any UI. Pan is in [-1,+1] (L..R, 0 = center).
 struct Track {
   std::string id;
   std::string name;
   bool muted = false;
+  bool solo = false;
   float gainDb = 0.0f;
+  float pan = 0.0f; // -1 = left, 0 = center, +1 = right
   std::vector<NoteEvent> notes;
   std::vector<AudioClip> clips;
 

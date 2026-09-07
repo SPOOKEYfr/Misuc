@@ -18,9 +18,10 @@ struct PlaybackClip {
   double startBeats = 0.0;        // placement on the timeline
   double offsetBeats = 0.0;       // trim-in offset into the source
   double durationBeats = 0.0;     // region length on the timeline
-  float gain = 1.0f;              // baked: track gain * clip gain
+  float gain = 1.0f;              // clip's own gain (track gain applied by mix)
   double fadeInBeats = 0.0;
   double fadeOutBeats = 0.0;
+  uint32_t track = 0;             // owning track index (into engine mixer array)
 };
 
 // Real-time-safe clip playback: resamples each decoded clip (linear

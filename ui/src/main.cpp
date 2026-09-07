@@ -80,6 +80,17 @@ int main(int argc, char** argv) {
       background-color: %4; color: %1; border: 1px solid %5;
       padding: 4px 8px;
     }
+    QMenuBar { background: %2; color: %1; padding: 2px 6px; }
+    QMenuBar::item { background: transparent; padding: 6px 12px; border-radius: 6px; }
+    QMenuBar::item:selected { background: %6; }
+    QMenu {
+      background-color: %4; color: %1; border: 1px solid %5;
+      border-radius: 8px; padding: 6px;
+    }
+    QMenu::item { padding: 6px 22px; border-radius: 4px; }
+    QMenu::item:selected { background-color: %7; color: black; }
+    QMenu::item:disabled { color: %3; }
+    QMenu::separator { height: 1px; background: %5; margin: 6px 8px; }
   )")
       .arg(misuc::ui::theme::kText.name())
       .arg(misuc::ui::theme::kBackground.name())

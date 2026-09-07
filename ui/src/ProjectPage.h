@@ -4,32 +4,32 @@
 
 #include <misuc/engine/project/Session.h>
 
-namespace misuc::engine {
-class AudioEngine;
-}
-
 class QLabel;
 class QLineEdit;
 
 namespace misuc::ui {
 
-// Project page: edit the .misuc session fields and persist to disk. Real
-// JSON serialization through the engine Session model.
+// Project page: edit the session fields (name, tempo). The Session is owned by
+// the main window so the File menu and the page share one document; every
+// committed edit emits edited() for the main window to push onto the undo
+// stack and mark the document dirty.
 class ProjectPage : public QWidget {
   Q_OBJECT
 public:
-  explicit ProjectPage(misuc::engine::AudioEngine& engine, QWidget* parent = nullptr);
+  explicit ProjectPage(misuc::project::Session& session, QWidget* parent = nullptr);
 
-private Q_SLOTS:
-  void save();
-  void loadPicked(const QString& path);
+  // Pull current session values into the editors (called after open/undo/redo).
+  void refresh();
+
+signals:
+  void edited();
 
 private:
-  misuc::engine::AudioEngine& engine_;
-  misuc::project::Session session_;
+  void commit();
+
+  misuc::project::Session* session_ = nullptr;
   QLineEdit* nameEdit_ = nullptr;
   QLineEdit* tempoEdit_ = nullptr;
-  QLabel* status_ = nullptr;
 };
 
 } // namespace misuc::ui

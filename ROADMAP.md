@@ -70,6 +70,18 @@ be refined as development proceeds.
 - File menu: New / Open / Save / Save As for `.misuc`.
 - Session persistence via JSON; undo stack foundation.
 
+## Phase 4 — Project workflow (done)
+
+- File menu: New / Open... / Save / Save As... / Quit (with `Ctrl+N/O/S/⇧S/Q`).
+- Unsaved-changes guard on New / Open / Quit (Save / Discard / Cancel).
+- The main window owns the session document; the Project page edits it; the
+  window title shows `name * - Misuc` while dirty.
+- Undo / Redo (Edit menu, `Ctrl+Z` / `Ctrl+⇧Z`) on a snapshot-based core
+  `UndoStack<T>`; bounded history, redo tail dropped on new edits. Unit-tested
+  (round-trip, branch truncation, capacity, clear).
+- Session tempo changes are pushed to the running engine from any entry point
+  (page edit, undo/redo, open, new).
+
 ## Phase 5 — Core UI/peripherals
 
 - Arrangement/mixer themes, piano roll rendering, timeline, MIDI note entry.

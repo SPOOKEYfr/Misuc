@@ -5,7 +5,13 @@
 
 #include <QApplication>
 #include <QButtonGroup>
+#include <QCloseEvent>
+#include <QFile>
+#include <QFileDialog>
 #include <QLabel>
+#include <QMenu>
+#include <QMenuBar>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QTimer>
@@ -23,9 +29,11 @@
 namespace misuc::ui {
 
 MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
-  setWindowTitle(QStringLiteral("Misuc"));
   resize(1180, 760);
   setMinimumSize(960, 620);
+  setWindowTitle(QStringLiteral("Untitled * - Misuc"));
+
+  buildMenus();
 
   auto* central = new QWidget(this);
   central->setObjectName(QStringLiteral("central"));
@@ -85,6 +93,9 @@ MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
   buildPages();
   pages_->setCurrentIndex(0);
 
+  // Seed the undo history so the first edit has something to revert to.
+  undo_.push(session_);
+
   // Poll transport + status at 30 Hz.
   timer_ = new QTimer(this);
   timer_->setInterval(33);
@@ -95,9 +106,53 @@ MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
 
 MainWindow::~MainWindow() = default;
 
+void MainWindow::buildMenus() {
+  QMenu* file = menuBar()->addMenu(QStringLiteral("&File"));
+  QAction* newAct =
+      file->addAction(QStringLiteral("&New"), this, &MainWindow::newProject,
+                      QKeySequence::New);
+  QAction* openAct =
+      file->addAction(QStringLiteral("&Open..."), this, &MainWindow::openDialog,
+                      QKeySequence::Open);
+  file->addSeparator();
+  QAction* saveAct = file->addAction(
+      QStringLiteral("&Save"), this, &MainWindow::saveProject,
+      QKeySequence::Save);
+  QAction* saveAsAct = file->addAction(
+      QStringLiteral("Save &As..."), this, &MainWindow::saveProjectAs,
+      QKeySequence::SaveAs);
+  file->addSeparator();
+  file->addAction(QStringLiteral("&Quit"), this, &QWidget::close,
+                  QKeySequence::Quit);
+  Q_UNUSED(newAct);
+  Q_UNUSED(openAct);
+  Q_UNUSED(saveAct);
+  Q_UNUSED(saveAsAct);
+
+  QMenu* edit = menuBar()->addMenu(QStringLiteral("&Edit"));
+  undoCmd_ = edit->addAction(QStringLiteral("&Undo"), this,
+                             &MainWindow::performUndo,
+                             QKeySequence::Undo);
+  redoCmd_ = edit->addAction(QStringLiteral("&Redo"), this,
+                             &MainWindow::performRedo,
+                             QKeySequence::Redo);
+  undoCmd_->setEnabled(undo_.canUndo());
+  redoCmd_->setEnabled(undo_.canRedo());
+}
+
 void MainWindow::buildPages() {
-  pages_->addWidget(new ProjectPage(engine_, this));
+  projectPage_ = new ProjectPage(session_, this);
+  pages_->addWidget(projectPage_);
   pages_->addWidget(new AudioSettingsPage(engine_, this));
+
+  connect(projectPage_, &ProjectPage::edited, this, [this] {
+    undo_.push(session_);
+    dirty_ = true;
+    applyTempoToEngine();
+    undoCmd_->setEnabled(undo_.canUndo());
+    redoCmd_->setEnabled(undo_.canRedo());
+    updateWindowTitle();
+  });
 }
 
 void MainWindow::poll() {
@@ -108,6 +163,142 @@ void MainWindow::poll() {
 void MainWindow::paintEvent(QPaintEvent*) {
   QPainter p(this);
   p.fillRect(rect(), theme::kBackground);
+}
+
+void MainWindow::closeEvent(QCloseEvent* event) {
+  if (!confirmDiscard()) {
+    event->ignore();
+    return;
+  }
+  event->accept();
+}
+
+void MainWindow::newProject() {
+  if (!confirmDiscard())
+    return;
+  session_ = misuc::project::Session();
+  projectPath_.clear();
+  dirty_ = false;
+  undo_.clear();
+  undo_.push(session_);
+  projectPage_->refresh();
+  applyTempoToEngine();
+  undoCmd_->setEnabled(false);
+  redoCmd_->setEnabled(false);
+  updateWindowTitle();
+}
+
+void MainWindow::openDialog() {
+  if (!confirmDiscard())
+    return;
+  const QString path = QFileDialog::getOpenFileName(
+      this, QStringLiteral("Open Misuc project"), QString(),
+      QStringLiteral("Misuc project (*.misuc)"));
+  if (!path.isEmpty())
+    openProject(path);
+}
+
+void MainWindow::openProject(const QString& path) {
+  QFile f(path);
+  if (!f.open(QIODevice::ReadOnly)) {
+    QMessageBox::warning(this, QStringLiteral("Open failed"), f.errorString());
+    return;
+  }
+  try {
+    session_ =
+        misuc::project::Session::fromJson(f.readAll().toStdString());
+  } catch (const std::exception& e) {
+    QMessageBox::warning(this, QStringLiteral("Invalid project"),
+                         QString::fromLatin1(e.what()));
+    return;
+  }
+  projectPath_ = path;
+  dirty_ = false;
+  undo_.clear();
+  undo_.push(session_);
+  projectPage_->refresh();
+  applyTempoToEngine();
+  undoCmd_->setEnabled(false);
+  redoCmd_->setEnabled(false);
+  updateWindowTitle();
+}
+
+bool MainWindow::saveProject() {
+  if (projectPath_.isEmpty())
+    return saveProjectAs();
+  return writeProject(projectPath_);
+}
+
+bool MainWindow::saveProjectAs() {
+  const QString path = QFileDialog::getSaveFileName(
+      this, QStringLiteral("Save Misuc project"), projectPath_,
+      QStringLiteral("Misuc project (*.misuc)"));
+  if (path.isEmpty())
+    return false;
+  return writeProject(path);
+}
+
+bool MainWindow::writeProject(const QString& path) {
+  QFile f(path);
+  if (!f.open(QIODevice::WriteOnly)) {
+    QMessageBox::warning(this, QStringLiteral("Save failed"), f.errorString());
+    return false;
+  }
+  f.write(QByteArray::fromStdString(session_.toJson()));
+  projectPath_ = path;
+  dirty_ = false;
+  updateWindowTitle();
+  return true;
+}
+
+void MainWindow::performUndo() {
+  if (!undo_.undo())
+    return;
+  session_ = undo_.state();
+  projectPage_->refresh();
+  applyTempoToEngine();
+  dirty_ = true;
+  undoCmd_->setEnabled(undo_.canUndo());
+  redoCmd_->setEnabled(undo_.canRedo());
+  updateWindowTitle();
+}
+
+void MainWindow::performRedo() {
+  if (!undo_.redo())
+    return;
+  session_ = undo_.state();
+  projectPage_->refresh();
+  applyTempoToEngine();
+  dirty_ = true;
+  undoCmd_->setEnabled(undo_.canUndo());
+  redoCmd_->setEnabled(undo_.canRedo());
+  updateWindowTitle();
+}
+
+void MainWindow::applyTempoToEngine() { engine_.setTempo(session_.tempo()); }
+
+void MainWindow::updateWindowTitle() {
+  const QString& name = QString::fromStdString(session_.name());
+  QString title = name;
+  if (dirty_)
+    title += QStringLiteral(" *");
+  title += QStringLiteral(" - Misuc");
+  setWindowTitle(title);
+}
+
+bool MainWindow::confirmDiscard() {
+  if (!dirty_)
+    return true;
+  const auto choice = QMessageBox::question(
+      this, QStringLiteral("Unsaved changes"),
+      QStringLiteral("Save changes to the current project?"),
+      QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+      QMessageBox::Save);
+  if (choice == QMessageBox::Cancel)
+    return false;
+  if (choice == QMessageBox::Save)
+    return saveProject();
+  return true;
 }
 
 } // namespace misuc::ui

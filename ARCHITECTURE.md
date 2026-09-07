@@ -50,6 +50,9 @@ misuc/
   lock-free queue (4096 records) and a separate thread drains and writes them.
 - `Json.h` — a small self-contained JSON parser/serializer used by the project
   format (no external dependency).
+- `UndoStack.h` — generic snapshot-based undo/redo history for copyable
+  document types. Bounded (default 50 snapshots); new edits discard the redo
+  tail. Backs the Edit menu's Undo/Redo over the session document.
 
 Everything the audio thread touches is passed **by value or piecewise** through
 the lock-free `ControlQueue` (`SPSCRing<ControlMessage, 1024>`). The engine drains
@@ -112,16 +115,27 @@ this queue at the top of each audio callback and applies changes.
 
 - `Session.{h,cpp}` — the `.misuc` project foundation as JSON
   (`kSchemaVersion = 1`): schemaVersion, app identity, metadata, transport.
+  Owned by the main window; persisted through the File menu and edited on the
+  Project page.
 
 ## UI (`ui/`)
 
 The UI is a Qt 6 Widgets application (`misuc_app`) with a custom-painted
-premium dark theme. Layout comprises a top transport bar, sidebars, status
-area, and content pages. The first real content page is an **Audio Settings**
-page that drives the live engine: it lists devices (output and input) from
-`PipeWireBackend::enumerateDevices`, offers sample-rate/buffer choices, shows
-latency, toggles the 440 Hz test tone and the groove beat, controls master and
-monitor gain, and shows live output/input meters with clip LEDs.
+premium dark theme. Layout comprises a menu bar (File / Edit), a top transport
+bar, sidebars, status area, and content pages.
+
+- **File menu**: New / Open... / Save / Save As... / Quit. The main window owns
+  the `Session` document and a `core::UndoStack<Session>`; the Project page and
+  the file menu operate on that one shared document. Window title shows
+  `name * - Misuc` while there are unsaved changes, with a Save / Discard /
+  Cancel guard on New / Open / Quit.
+- **Edit menu**: Undo / Redo (`Ctrl+Z` / `Ctrl+Shift+Z`) over snapshots of the
+  session.
+- **Audio Settings** page drives the live engine: it lists devices (output and
+  input) from `PipeWireBackend::enumerateDevices`, offers sample-rate/buffer
+  choices, shows latency, toggles the 440 Hz test tone and the groove beat,
+  controls master and monitor gain, and shows live output/input meters with
+  clip LEDs.
 
 The UI talks only to `AudioEngine` (and through it the backend interface); it
 never touches PipeWire directly.

@@ -6,6 +6,7 @@ add_executable(misuc_tests
   test_transport.cpp
   test_dsp.cpp
   test_logger.cpp
+  test_undo.cpp
   test_audio.cpp)
 
 target_link_libraries(misuc_tests PRIVATE misuc_engine)

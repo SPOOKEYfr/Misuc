@@ -10,4 +10,5 @@ Terminal=false
 Categories=AudioVideo;Audio;Music;AudioVideoEditing;
 Keywords=MIDI;sequencer;DAW;music;production;audio;
 StartupNotify=true
+StartupWMClass=misuc_app
 SingleMainWindow=true

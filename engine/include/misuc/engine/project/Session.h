@@ -22,8 +22,12 @@ struct NoteEvent {
 // An audio region on a track's timeline, backed by a sound file on disk.
 // Timeline quantities (start, duration, offset, fades) are in beats to match
 // the note model; the engine resamples the source to the project rate on
-// playback. `sourceFile` is the persistent reference to the audio asset; the
-// session serializes it verbatim so projects keep working after a reload.
+// playback. `sourceFile` is the persistent reference to the audio asset. The
+// in-memory session always holds absolute paths so playback works after a
+// reload; MainWindow calls Session::relativizeAssets before writing a project
+// to disk so the saved document stays portable (assets inside the project
+// folder are stored relative to it), and Session::resolveAssets after loading
+// to restore absolute paths for the engine.
 struct AudioClip {
   std::string id;
   std::string name;
@@ -108,6 +112,18 @@ public:
 
   // Load from .misuc text. Throws std::runtime_error on malformed input.
   static Session fromJson(const std::string& text);
+
+  // Portable asset paths. Converts every absolute clip path that lives under
+  // `baseDir` into a path relative to it, so the serialized project still
+  // references its audio after the folder moves. Paths outside `baseDir`
+  // (and paths already relative) are left untouched. Mutates this session so
+  // callers can relativize a copy to keep the live session absolute.
+  void relativizeAssets(const std::string& baseDir);
+
+  // Inverse of relativizeAssets: joins any relative clip path against
+  // `baseDir` to restore absolute paths for playback. Absolute paths (and
+  // already-resolved paths such as `~` references) are left untouched.
+  void resolveAssets(const std::string& baseDir);
 
 private:
   std::string newTrackId();

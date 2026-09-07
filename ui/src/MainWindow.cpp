@@ -481,6 +481,9 @@ void MainWindow::openProject(const QString& path) {
                          QString::fromLatin1(e.what()));
     return;
   }
+  // Saved documents store assets inside the project folder as relative paths;
+  // the running session needs absolute paths so the engine can play them.
+  session_.resolveAssets(QFileInfo(path).absolutePath().toStdString());
   projectPath_ = path;
   dirty_ = false;
   undo_.clear();
@@ -519,7 +522,11 @@ bool MainWindow::writeProject(const QString& path) {
     QMessageBox::warning(this, QStringLiteral("Save failed"), f.errorString());
     return false;
   }
-  f.write(QByteArray::fromStdString(session_.toJson()));
+  // Serialize a relativized copy so the document is portable alongside its
+  // `<folder>/audio/` assets; the live session keeps absolute paths.
+  misuc::project::Session copy = session_;
+  copy.relativizeAssets(QFileInfo(path).absolutePath().toStdString());
+  f.write(QByteArray::fromStdString(copy.toJson()));
   projectPath_ = path;
   dirty_ = false;
   updateWindowTitle();

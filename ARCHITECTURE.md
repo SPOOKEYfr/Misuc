@@ -157,6 +157,14 @@ this queue at the top of each audio callback and applies changes.
   carry an ordered list of `AudioClip`s (name, source file, start/duration in
   beats, sample rate, channels); the field is optional so version-1
   documents (no tracks) and v2 documents without clips still load.
+  **Portable asset paths** (Item #5): `Session::relativizeAssets(baseDir)` /
+  `resolveAssets(baseDir)` convert every clip path that lives under `baseDir`
+  between absolute and project-relative form, so a saved `.misuc` travels
+  with its `<folder>/audio/` assets. MainWindow writes a relativized *copy* on
+  save (the live session keeps absolute paths for playback) and resolves
+  relative references back to absolute paths right after loading. Files
+  outside the project folder stay absolute so they remain valid wherever the
+  project lands.
 - `MidiScore.h` / `ClipScore.h` — `buildMidiScore(Session, score)` flattens a
   session into a sorted playback score; `buildClipScore(Session, clips)` sorts
   active clips by start beat and bounds them against a time horizon. Notes and

@@ -267,4 +267,49 @@ Session Session::fromJson(const std::string& text) {
   return s;
 }
 
+namespace {
+
+std::string normalizeBaseDir(const std::string& baseDir) {
+  std::string base = baseDir;
+  while (base.size() > 1 && base.back() == '/')
+    base.pop_back();
+  return base;
+}
+
+bool startsWith(const std::string& s, const std::string& prefix) {
+  return s.size() >= prefix.size() &&
+         s.compare(0, prefix.size(), prefix) == 0;
+}
+
+} // namespace
+
+void Session::relativizeAssets(const std::string& baseDir) {
+  const std::string base = normalizeBaseDir(baseDir);
+  if (base.empty())
+    return;
+  const std::string prefix = base + "/";
+  for (Track& t : tracks_) {
+    for (AudioClip& c : t.clips) {
+      if (c.sourceFile.empty() || c.sourceFile.front() != '/')
+        continue; // already relative or an in-memory-only reference
+      if (!startsWith(c.sourceFile, prefix))
+        continue; // external asset: keep absolute so it stays valid
+      c.sourceFile = c.sourceFile.substr(prefix.size());
+    }
+  }
+}
+
+void Session::resolveAssets(const std::string& baseDir) {
+  const std::string base = normalizeBaseDir(baseDir);
+  if (base.empty())
+    return;
+  for (Track& t : tracks_) {
+    for (AudioClip& c : t.clips) {
+      if (c.sourceFile.empty() || c.sourceFile.front() == '/')
+        continue; // absolute (or empty) already resolves
+      c.sourceFile = base + "/" + c.sourceFile;
+    }
+  }
+}
+
 } // namespace misuc::project

@@ -138,3 +138,71 @@ TEST_CASE(session_reads_v1_document) {
   TEST_ASSERT(loaded.timeSigDenominator() == 4);
   TEST_ASSERT(loaded.tracks().empty());
 }
+
+using misuc::project::AudioClip;
+
+// Phase 12 Item #5: portable asset paths. MainWindow relativizes before
+// writing (so a saved .misuc references its `<folder>/audio/` assets by
+// relative path) and resolves after loading (so the running session holds
+// absolute paths the engine can play).
+TEST_CASE(session_clip_paths_roundtrip) {
+  Session s;
+  const std::string id = s.addTrack("Vocals");
+  s.addClip(id, AudioClip{/*id*/ "c1", /*name*/ "Take 1",
+                          /*sourceFile*/ "/home/me/proj/audio/take1.wav",
+                          /*startBeats*/ 1.0, /*durationBeats*/ 2.0,
+                          /*clipOffsetBeats*/ 0.0, /*gainDb*/ 0.0f,
+                          /*fadeInBeats*/ 0.0, /*fadeOutBeats*/ 0.0,
+                          /*sampleRate*/ 48000, /*channels*/ 1});
+
+  // Save-side: absolute path under the project folder becomes a relative one.
+  Session copy = s;
+  copy.relativizeAssets("/home/me/proj");
+  const std::string& stored = copy.tracks()[0].clips[0].sourceFile;
+  TEST_ASSERT(stored == "audio/take1.wav");
+
+  // The live session that gets serialized is unmodified.
+  TEST_ASSERT(s.tracks()[0].clips[0].sourceFile ==
+              "/home/me/proj/audio/take1.wav");
+
+  // Load-side: relative path resolves back against the project folder.
+  Session saved = Session::fromJson(copy.toJson());
+  saved.resolveAssets("/home/me/proj");
+  TEST_ASSERT(saved.tracks()[0].clips[0].sourceFile ==
+              "/home/me/proj/audio/take1.wav");
+}
+
+TEST_CASE(session_clip_paths_external_assets_stay_absolute) {
+  Session s;
+  const std::string id = s.addTrack("Loop");
+  s.addClip(id, AudioClip{/*id*/ "c1", /*name*/ "Sample",
+                          /*sourceFile*/ "/opt/samples/beat.wav",
+                          /*startBeats*/ 0.0, /*durationBeats*/ 4.0,
+                          /*clipOffsetBeats*/ 0.0, /*gainDb*/ 0.0f,
+                          /*fadeInBeats*/ 0.0, /*fadeOutBeats*/ 0.0,
+                          /*sampleRate*/ 44100, /*channels*/ 2});
+
+  // A file outside the project folder must keep its absolute reference.
+  Session copy = s;
+  copy.relativizeAssets("/home/me/proj");
+  TEST_ASSERT(copy.tracks()[0].clips[0].sourceFile ==
+              "/opt/samples/beat.wav");
+
+  // Absolute (and `~`-style) references survive a resolve unchanged.
+  Session loaded = Session::fromJson(copy.toJson());
+  loaded.resolveAssets("/home/me/proj");
+  TEST_ASSERT(loaded.tracks()[0].clips[0].sourceFile ==
+              "/opt/samples/beat.wav");
+
+  Session rel;
+  const std::string rid = rel.addTrack("Rel");
+  rel.addClip(rid, AudioClip{/*id*/ "c1", /*name*/ "R",
+                             /*sourceFile*/ "audio/in.wav", /*startBeats*/ 0.0,
+                             /*durationBeats*/ 1.0, /*clipOffsetBeats*/ 0.0,
+                             /*gainDb*/ 0.0f, /*fadeInBeats*/ 0.0,
+                             /*fadeOutBeats*/ 0.0, /*sampleRate*/ 48000,
+                             /*channels*/ 2});
+  rel.resolveAssets("/home/me/proj");
+  TEST_ASSERT(rel.tracks()[0].clips[0].sourceFile ==
+              "/home/me/proj/audio/in.wav");
+}

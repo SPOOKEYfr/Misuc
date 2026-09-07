@@ -382,6 +382,40 @@ be refined as development proceeds.
 - Harness checks the nav logo pixmap and the full theme round-trip; app smoke,
   engine suite and harness all green.
 
+## Phase 12 — Portable projects & record-through verification (done)
+
+- **Portable asset paths (Item #5)**: `Session` gains
+  `relativizeAssets(baseDir)` / `resolveAssets(baseDir)` — every clip path that
+  lives under the project folder is converted between absolute and
+  project-relative form, so a saved `.misuc` stays portable next to its
+  `<folder>/audio/` assets. `MainWindow::writeProject` serializes a
+  relativized *copy* (the live session keeps absolute paths, so playback is
+  unaffected after a save), and `openProject` resolves relative references
+  back to absolute paths immediately after loading (before the clip score is
+  rebuilt). External assets outside the project folder keep their absolute
+  references. Unit tests in `tests/test_json.cpp` (+6): absolute → relative →
+  absolute round-trip, external paths stay absolute, and `~`/relative
+  references survive a resolve unchanged. The UI harness (Phase 14, now 207
+  checks) does an end-to-end Save → inspect the document on disk → `openProject`
+  round-trip with a real asset staged in `audio/`, asserting the saved JSON
+  holds `audio/tone.wav` and the reloaded session resolves it back to an
+  absolute path. `writeProject`/`openProject` are exposed as public test hooks
+  next to the existing `session()`/`setExportPathOverride`.
+- **Record playthrough integration (Item #4)**: `tests/test_record.cpp` (+2
+  cases) drives an offline `AudioEngine::process()` with a published score and
+  a deterministic sine input while the transport plays. It proves the take
+  captured during playback equals the fed input sample-for-sample (< 1e-4) and
+  is mono at the project rate — and that the same input prints into the
+  monitored output where the loop plays (loop + input louder than the loop
+  alone) and appears on its own past the loop while the transport runs on
+  (real playthrough, monitor buses at the default 0 dB). A second case confirms
+  a stopped transport captures nothing (`takeRecordedSamples` stays empty), the
+  behavior the count-in UI relies on.
+- All verification green: engine suite **54145 checks / 0 failures** (+6 from
+  the asset-path unit tests, +12 from the record-playthrough cases), the UI
+  harness runs **207 checks, ALL OK**, the app smoke-tests clean, and the
+  build is warning-clean.
+
 ## Phase 8+ — Beyond
 
 - VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU

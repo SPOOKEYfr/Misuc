@@ -42,6 +42,10 @@ public:
   void sessionEdited() { onSessionEdited(); }
   // Test hook: skip the save dialog and render straight to this path.
   void setExportPathOverride(const QString& path) { exportPathOverride_ = path; }
+  // Test hooks: direct save/load with an explicit path (used by the harness
+  // to verify the portable asset-path round-trip and app restore).
+  bool writeProject(const QString& path);
+  void openProject(const QString& path);
 
 protected:
   void paintEvent(QPaintEvent* event) override;
@@ -58,10 +62,8 @@ private:
 
   void newProject();
   void openDialog();
-  void openProject(const QString& path);
   bool saveProject();
   bool saveProjectAs();
-  bool writeProject(const QString& path);
   void exportAudio();
   void performUndo();
   void performRedo();

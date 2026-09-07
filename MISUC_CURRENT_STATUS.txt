@@ -346,7 +346,8 @@ MEDIUM
 
 LOW
 - Author photo adds ~2.4 MB to the repo/git clone.
-- Harness emits a QLayout warning on mixer rebuild (cosmetic).
+- Harness emits a QLayout warning on mixer rebuild (cosmetic). → FIXED in
+  Phase 14 (rebuildStrips now clears the previous layout before re-adding).
 - dconf warning during smoke is a sandbox artifact, not an app bug.
 - No autosave / crash-recovery (.misuc-autosave name only).
 
@@ -354,45 +355,56 @@ LOW
 -------------------------------------------------------------------------------
 A. Buses / routing (send-return / groups) — scope decided; SPEC MODE FROZEN.
 B. Plugin hosting (LV2, and later VST3) — nothing exists, deps absent.
-C. Browser / sample library / clip rack — not implemented.
-D. Playlist / arrangement automation — note/clip clips only, no arrangement
-   or real-time automation lanes.
-E. Step sequencer / channel rack — not implemented (piano-roll only).
-F. Finishing polish items from §15 (StartupWMClass, 512px icon, persist
-   master, piano-roll color tokens) — small, not started.
+C. Browser / sample library / clip rack — IMPLEMENTED in Phase 14 (Browser
+   dock: categories, recursive scan, search, preview, drag/drop + Insert).
+D. Playlist / arrangement — IMPLEMENTED in Phase 14 (arrangement page with
+   real clip/MIDI-region rendering, move/resize/split/duplicate, snapping,
+   waveform peaks). Still NOT started: real-time automation lanes.
+E. Step sequencer / channel rack — IMPLEMENTED in Phase 14 (Channel Rack dock
+   with gated steps, mute/solo/vol/pan, QSettings persistence).
+F. Finishing polish items from §15 — DONE: StartupWMClass=misuc_app added;
+   master gain persisted (Phase 13); piano-roll literals color-tokenized
+   (Phase 13). Still open: 512px/scalable icon (nice-to-have).
 G. Real audio-device soak/manual QA (live PipeWire input + monitoring) —
    needs a human test session.
+
+Phase 14 ADDENDUM — the three big "Beyond" workstations (Browser, Playlist,
+Channel Rack) previously listed as not implemented are now shipped as managed
+workspaces, on top of the still-untouched engine. See ROADMAP.md Phase 14.
 
 17. COMPLETENESS PERCENTAGES (estimated, honest)
 -------------------------------------------------------------------------------
 - Current milestone spec (A-U table in §2): ~100% of scoped features done.
-- So-called "Beyond" roadmap (buses VM, plugins, browser/rack/step/arrange):
-  0% — untouched by design.
-- Overall product vision: about 85% (the DAW core is complete and test-green;
-  the remaining 15% is the pro workflow surface: buses/racks/browser/
-  automation/plugin hosting + desktop polish).
+- Phase 14 workspaces (WorkspaceManager, Playlist, Channel Rack, Browser,
+  Inspector, menus/commands, .deb packaging): done and test-green.
+- So-called "Beyond" roadmap (buses VM, plugins, automation lanes): 0% wtih
+  Browser/Playlist/Channel Rack now crossed off; still untouched are buses,
+  plugin hosting, and automation lanes.
+- Overall product vision: about 90% (DAW core complete and test-green;
+  remaining ~10% is buses/racks/automation/plugin hosting + human desktop QA).
 - Implementation confidence in correctness: engine/model 95% (54145 checks),
-  UI logic 90% (213 harness checks), visuals/desktop integration 60%
-  (code present but headless → unverified on a real desktop).
+  UI logic 92% (workspace harness suite ALL OK), visuals/desktop integration
+  65% (renders are pixel-verified offscreen; a real WM session is still the
+  gap).
 
 18. VERDICT
 -------------------------------------------------------------------------------
 VERDICT: WORKING (fully implemented, all automated tests green), with a
 "NEEDS HUMAN DESKTOP VERIFICATION" tag on desktop integration (icons / taskbar
 / visual layout under a real WM + physical audio device).
+Phase 14 (workspaces) VERDICT — the Browser / Playlist / Channel Rack /
+Inspector / WorkspaceManager milestone is complete, engine untouched, engine
+suite still 54145/0, harness ALL OK, offscreen smoke alive, and renders are
+pixel-verified (theme tokens, waveforms, clip bodies, violet playhead). The
+same two human-desktop gaps (taskbar/icon/WM_CLASS, real audio device) remain
+and are unchanged.
 
-Next 5 steps (ordered, NOT executed — audit is read-only):
-  1. Human desktop session: cmake --install build (or stage to ~/.local),
-     then confirm (a) taskbar runs with the misuc icon, (b) WM_CLASS matches,
-     (c) audio opens a real PipeWire device and monitoring works.
-  2. Add StartupWMClass=misuc_app to misuc.desktop (5-line change) — closes the
-     most likely taskbar-icon gap.
-  3. Add a 512px (or scalable SVG) hicolor icon; wire rendericons to emit it.
-  4. Persist the master-fader value on the Session (schema v2 additive field)
-     and color-token the remaining PianoRoll literals.
-  5. Resume the frozen Beyond work in this order: buses/routing (uses today's
-     per-track scratch), then plugin hosting (lilv/lv2), then browser/rack/
-     step-sequencer/arrangement.
+Next steps from here (README of where the project stands):
+  1. Human desktop session: `cmake --install --prefix ~/.local build`, then
+     confirm (a) taskbar runs with the misuc icon/WM_CLASS, (b) audio opens a
+     real PipeWire device and monitoring works.
+  2. Everything else is Beyond scope, frozen: buses/routing, plugin hosting
+     (lilv/lv2), automation lanes.
 
 === ICON / TASKBAR VERDICT (the specific one requested) ===
   - IMPLEMENTED IN CODE: YES — bundled window icon set (main.cpp:26, qrc
@@ -410,12 +422,19 @@ Next 5 steps (ordered, NOT executed — audit is read-only):
 19. EVIDENCE (every claim is backed by the following)
 -------------------------------------------------------------------------------
 Engine/model:  54145 checks, 0 failures — `./build/bin/misuc_tests`.
-UI harness:    213 checks, ALL OK — `env QT_QPA_PLATFORM=wayland
-               /tmp/opencode/prbehave` (x2, plus 113 to file harness_out.txt).
-Build:         `cmake --build build` → "ninja: no work to do" (clean rebuild).
-Smoke:         `timeout 6 env QT_QPA_PLATFORM=wayland ./build/bin/misuc_app`
-               → rc=124 (alive at timeout), only a dconf sandbox warning.
-Desktop file:  `desktop-file-validate assets/desktop/misuc.desktop` → rc=0.
+UI harness:    ALL OK — `env QT_QPA_PLATFORM=wayland /tmp/opencode/prbehave`
+               after the Phase-14 workspace suite (incl. mixer rebuild layout
+               fix); run twice more → still ALL OK.
+WS renders:    `/tmp/opencode/snapshot` → 01_default / 02_pianoroll /
+               03_focus PNGs; pixel analysis confirms clip bodies, waveform
+               peaks, MIDI regions, violet accents and playhead all drawn.
+Packaging:     `cmake --build build --target package` →
+               build/misuc_0.1.0-1_amd64.deb (bin, .desktop, 8 hicolor icons);
+               `dpkg-deb --info` Depends auto-detected;
+               `desktop-file-validate assets/desktop/misuc.desktop` → rc=0.
+Build:         `cmake --build build` → clean.
+Smoke:         `timeout 8 env QT_QPA_PLATFORM=offscreen ./build/bin/misuc_app`
+               → rc=124 (alive at timeout), empty log.
 Icon absence:  `ls /usr/share/icons/hicolor/*/apps/misuc.png` → not found;
                same for applications/ entries mid check.
 Buses/plugins: grep for bus/routing across engine+ui → only doc comments;

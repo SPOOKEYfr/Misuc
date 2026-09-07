@@ -308,6 +308,53 @@ gestures emit `PianoRoll::audition(freq, velocity)` (add / drag / click),
 The UI talks only to `AudioEngine` (and through it the backend interface); it
 never touches PipeWire directly.
 
+### Modular workspaces (Phase 14)
+
+The Phase-13 shell grew from three fixed pages into a managed set of
+workspaces, all owned by one object:
+
+- **`ui/src/workspace/WorkspaceManager.{h,cpp}`** — owns the central
+  `QTabWidget` (Playlist, Piano Roll, Project, Audio, Appearance) and every
+  `QDockWidget` (Browser left, Mixer bottom, Inspector + Channel Rack right)
+  with `addCentral` / `addDock`, `widget()` / `docks()`, `isVisible()`,
+  `showWorkspace()` / `toggleWorkspace()`, six presets (Default / Playlist /
+  Piano Roll / Channel Rack / Mixing / Recording) that hide-all-then-show the
+  relevant docks and switch the central tab, and QSettings persistence of the
+  dock state (through `QMainWindow::saveState`), active central tab, and
+  preset. Signals: `workspaceToggled(Id, bool)` and `centralChanged(Id)`.
+- **`ui/src/playlist/Playlist.{h,cpp}`** — arrangement page. `PlaylistGrid`
+  paints the time ruler, per-track lanes (mute/solo dots in the label column),
+  audio clips with real decoded waveform peaks (`<sndfile.h>` windowed 256×256
+  sampling, cached in a static QHash), and MIDI regions derived straight from
+  each track's `NoteEvent`s. Selection, drag-move/resize (beat-snapped),
+  split-at-playhead, duplicate, delete, rename, context menu, Browser
+  drop-import, Import Audio, and Select / Slice / Snap toolbar tools. It keeps
+  the engine transport position and renders the shared violet playhead. Exposes
+  `SelectionSummary` for the Inspector and mirrors selection to the Editor and
+  Mixer.
+- **`ui/src/channel/ChannelRack.{h,cpp}`** — step sequencer as QTableView +
+  QStandardItemModel with a custom delegate (gated cells accent-filled, mute /
+  solo, volume bar + %, pan). Persisted channel snapshots go to QSettings
+  (`ui/channelRack`, base64 step masks); not part of the undo/session model.
+- **`ui/src/browser/Browser.{h,cpp}`** — left dock. Category tree (All
+  Samples, Current Project, Instruments, Audio Effects, MIDI, Plugins),
+  recursive real-file scan (capped), search filter, on-demand decode preview
+  via `misuc::audio::readAudioFile`, and two ways to insert a sample into the
+  Playlist (drag-and-drop and Insert). Plugin category entries are
+  informational text rows only — no fake DSP.
+- **`ui/src/inspector/Inspector.{h,cpp}`** — right dock. Read-only context
+  panel (workspace intro / track / audio clip / MIDI region / note) driven by
+  `Playlist::selectionSummary()`; owners mutate their own data, so the
+  Inspector is a faithful mirror by design.
+- **Commands** (`ui/src/commands/MisucCommandRegistry`) and **tooltips**
+  (`ui/src/tooltip/MisucTooltip`) stay the single source of truth for menus,
+  header buttons, and hint text; `buildCommands()` in MainWindow registers
+  workspace, transport, metronome, snap, and song/pattern commands.
+- Session mutation flows through `Session::tracks()` (mutable reference); the
+  engine API is untouched. Clip mute is a `gainDb=-96` convention, and dropped
+  Browser samples reference their original absolute paths (asset staging is
+  still used for editor imports).
+
 ## Data flow (audio thread)
 
 ```

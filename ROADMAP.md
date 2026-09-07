@@ -460,6 +460,62 @@ foundation untouched (engine suite still 54145 checks / 0 failures).
 - Verification: engine **54145 / 0**, harness **213 ALL OK**, smoke rc=124
   (alive), desktop-file-validate rc=0.
 
+## Phase 14 — Workspaces: Playlist, Channel Rack, Browser, Inspector (done)
+
+Per the master product spec §58: modifiable workspaces on top of the
+unchanged engine core (engine suite still 54145 checks / 0 failures).
+Workstations mutate the Session only via the public `tracks()` reference; no
+engine code changed.
+
+- **WorkspaceManager**: owns the central `QTabWidget` and every `QDockWidget`
+  in one place. Central screens (Playlist, Piano Roll, Project, Audio,
+  Appearance) and docks (Browser left, Mixer bottom, Inspector + Channel Rack
+  right) are registered as one managed set with `isVisible()`,
+  `showWorkspace()` / `toggleWorkspace()`, six presets (Default / Playlist /
+  Piano Roll / Channel Rack / Mixing / Recording), and full QSettings
+  persistence of dock states, active central tab, and chosen preset.
+- **Playlist** (`Playlist` + `PlaylistGrid`): real arrangement view bound to
+  the Session — per-track lanes with mute/solo dots, a time ruler, a violet
+  playhead fed from the engine, real waveform peaks for audio clips
+  (`<sndfile.h>`, windowed 256×256 sampling, cached) that play back through
+  the engine, MIDI regions derived from track notes, clip drag/move/resize
+  with beat snapping, split-at-playhead, duplicate, delete, rename via a
+  context menu, drag-and-drop import from the Browser, Import Audio, and
+  Select / Slice / Snap toolbar tools. Clip selection is mirrored to the
+  Editor, Mixer, and the Inspector; undo/redo hook into the editor's session
+  stack.
+- **Channel Rack**: step sequencer as a QTableView + QStandardItemModel +
+  custom delegate — 16 gated steps per channel (violet active cells), mute /
+  solo / volume / pan per channel, persisted per-rack snapshots to QSettings
+  (base64 step masks), and a starter set of Kick / Snare / Hi-Hat / Bass /
+  Sampler channels.
+- **Browser** (left dock): category tree (All Samples, Current Project,
+  Instruments, Audio Effects, MIDI, Plugins — plugin rows are informational
+  only, no fake DSP), recursive sample scan (Music + home music dirs, capped
+  at 4000 files), search filter, real preview via `audio::readAudioFile`
+  (decoded waveform + metadata, decoded on demand), and drag-and-drop / Insert
+  that adds samples straight into the Playlist.
+- **Inspector** (right dock): context panel that mirrors the current
+  selection — workspace intro, track, audio clip, MIDI region, or note
+  properties — driven live by Playlist selection. Read-only by design; edits
+  happen in their owning workspaces.
+- **Header strip → workshop wiring**: the global header's workspace strip now
+  communicates with the WorkspaceManager (toggle ↔ active highlight), the
+  snap/mode buttons drive the Playlist, F5/F6/F7/F8/F9 + Ctrl+Shift+I toggle
+  every workspace, and the transport clock stays the single playhead source.
+- **Menus + commands**: restructured menus (File / Edit / Add / Patterns /
+  View / Options / Tools / Help) where every item either maps to a
+  `MisucCommandRegistry` command (workspaces, transport, metronome, snap,
+  song/pattern mode) or is wired to real pages; "Export &Audio..." and
+  "&About Misuc..." preserved.
+- **Linux packaging**: CPack DEB (`build/misuc_0.1.0-1_amd64.deb`) installing
+  the app, the hicolor icon set, and the validated `.desktop` entry
+  (`desktop-file-validate` rc=0) with `StartupWMClass`.
+- Verification: engine **54145 / 0**, harness **ALL OK** (full workspace
+  suite), offscreen smoke rc=124 (alive), pixel-verified renders of the
+  default / piano-roll / focus workspaces (theme tokens present, waveforms and
+  clip bodies drawn, violet playhead rendered).
+
 ## Phase 8+ — Beyond
 
 - VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU

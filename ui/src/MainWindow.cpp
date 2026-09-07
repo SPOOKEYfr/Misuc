@@ -35,6 +35,7 @@
 #include "Theme.h"
 #include "TransportBar.h"
 #include "PianoRoll.h"
+#include "branding/AboutDialog.h"
 #include "branding/Logo.h"
 #include "mixer/MixerPage.h"
 #include "theme/ThemeEngine.h"
@@ -184,6 +185,10 @@ void MainWindow::buildMenus() {
                              QKeySequence::Redo);
   undoCmd_->setEnabled(undo_.canUndo());
   redoCmd_->setEnabled(undo_.canRedo());
+
+  QMenu* help = menuBar()->addMenu(QStringLiteral("&Help"));
+  help->addAction(QStringLiteral("&About Misuc..."), this,
+                  &MainWindow::showAbout);
 }
 
 void MainWindow::buildPages() {
@@ -427,6 +432,11 @@ void MainWindow::applyBranding() {
   const QPixmap pm = logoPixmap(56, theme::kAccent, theme::kAccentSoft);
   navLogo_->setPixmap(pm.scaled(56, 56, Qt::KeepAspectRatio,
                                 Qt::SmoothTransformation));
+}
+
+void MainWindow::showAbout() {
+  misuc::ui::AboutDialog dlg(this);
+  dlg.exec();
 }
 
 void MainWindow::closeEvent(QCloseEvent* event) {

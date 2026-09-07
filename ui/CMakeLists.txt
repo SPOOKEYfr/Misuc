@@ -8,6 +8,7 @@ add_executable(misuc_app
   src/theme/ThemeEngine.cpp
   src/theme/ThemePage.cpp
   src/branding/Logo.cpp
+  src/branding/AboutDialog.cpp
   src/MainWindow.cpp
   src/TransportBar.cpp
   src/MeterWidget.cpp

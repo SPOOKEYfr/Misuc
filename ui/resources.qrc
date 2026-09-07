@@ -1,5 +1,6 @@
 <RCC>
     <qresource prefix="/">
         <file alias="icons/misuc-256.png">resources/icons/misuc-256.png</file>
+        <file alias="about/obhup.png">resources/about/obhup.png</file>
     </qresource>
 </RCC>

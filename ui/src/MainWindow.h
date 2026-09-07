@@ -59,6 +59,8 @@ private:
   void onSessionEdited();
   // Repaint the nav-rail brand mark from the current theme accent.
   void applyBranding();
+  // Help -> About Misuc…
+  void showAbout();
 
   void newProject();
   void openDialog();

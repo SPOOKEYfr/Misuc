@@ -5,6 +5,7 @@ qt_standard_project_setup()
 add_executable(misuc_app
   src/main.cpp
   src/Theme.cpp
+  src/theme/ThemeEngine.cpp
   src/MainWindow.cpp
   src/TransportBar.cpp
   src/MeterWidget.cpp

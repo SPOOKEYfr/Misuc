@@ -7,11 +7,11 @@
 #include <misuc/engine/core/UndoStack.h>
 #include <misuc/engine/project/Session.h>
 
-class QStackedWidget;
-class QTimer;
-class QMenu;
 class QAction;
+class QTimer;
 class QLabel;
+class QTabWidget;
+class QDockWidget;
 
 namespace misuc::engine {
 class AudioEngine;
@@ -19,17 +19,20 @@ class AudioEngine;
 
 namespace misuc::ui {
 
-class TransportBar;
+class HeaderBar;
+class HintManager;
 class StatusPanel;
 class ProjectPage;
 class EditorPage;
 class AudioSettingsPage;
 class MixerPage;
 class ThemePage;
+class TransportBar;
 
-// Application shell: menu bar (File / Edit), a project document shared between
-// the Project page and the file menu, transport on top, navigation rail, a
-// stack of real pages (Project, Audio), and the status strip.
+// Application shell: global header toolbar (brand + transport + status),
+// a tabbed central workspace (Project / Editor / Audio / Appearance), a
+// dockable Mixer panel, a contextual HintBar + status strip, and the File /
+// Edit / Workspace / Help menus. Project document semantics are unchanged.
 class MainWindow : public QMainWindow {
   Q_OBJECT
 public:
@@ -47,6 +50,8 @@ public:
   bool writeProject(const QString& path);
   void openProject(const QString& path);
 
+  HeaderBar* headerBar() const { return headerBar_; }
+
 protected:
   void paintEvent(QPaintEvent* event) override;
   void closeEvent(QCloseEvent* event) override;
@@ -57,10 +62,11 @@ private:
   void poll();
   void feedPlayhead();
   void onSessionEdited();
-  // Repaint the nav-rail brand mark from the current theme accent.
-  void applyBranding();
   // Help -> About Misuc…
   void showAbout();
+  void applyLayoutPreset(const QString& name);
+  void persistLayout();
+  void restoreLayout();
 
   void newProject();
   void openDialog();
@@ -69,6 +75,7 @@ private:
   void exportAudio();
   void performUndo();
   void performRedo();
+  void togglePlayStop();
   void applyTempoToEngine();
   void applyLoopToEngine(misuc::project::Session& s);
   void rebuildMidiScore();
@@ -88,17 +95,18 @@ private:
   QString projectPath_;
   bool dirty_ = false;
 
-  QStackedWidget* pages_ = nullptr;
+  HeaderBar* headerBar_ = nullptr;
   TransportBar* transport_ = nullptr;
   StatusPanel* status_ = nullptr;
+  HintManager* hints_ = nullptr;
   ProjectPage* projectPage_ = nullptr;
   EditorPage* editorPage_ = nullptr;
   AudioSettingsPage* audioSettings_ = nullptr;
   MixerPage* mixerPage_ = nullptr;
   ThemePage* themePage_ = nullptr;
   QTimer* timer_ = nullptr;
-  QWidget* navRail_ = nullptr;
-  QLabel* navLogo_ = nullptr;
+  QTabWidget* workspace_ = nullptr;
+  QDockWidget* mixerDock_ = nullptr;
 
   // Headless/testing hook: when set, exportAudio() skips the save dialog and
   // renders directly to this path.

@@ -9,6 +9,9 @@ add_executable(misuc_app
   src/theme/ThemePage.cpp
   src/branding/Logo.cpp
   src/branding/AboutDialog.cpp
+  src/branding/Icons.cpp
+  src/HeaderBar.cpp
+  src/HintSystem.cpp
   src/MainWindow.cpp
   src/TransportBar.cpp
   src/MeterWidget.cpp

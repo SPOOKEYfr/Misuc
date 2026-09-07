@@ -5,9 +5,10 @@
 #include <utility>
 
 #include <QApplication>
-#include <QButtonGroup>
+#include <QActionGroup>
 #include <QCloseEvent>
 #include <QDateTime>
+#include <QDockWidget>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
@@ -16,12 +17,14 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPainter>
 #include <QPushButton>
-#include <QStackedWidget>
+#include <QSettings>
+#include <QShortcut>
 #include <QStatusBar>
+#include <QTabWidget>
 #include <QTimer>
 #include <QVBoxLayout>
-#include <QPainter>
 
 #include <misuc/engine/audio/AudioEngine.h>
 #include <misuc/engine/audio/ClipScore.h>
@@ -30,6 +33,8 @@
 
 #include "AudioSettingsPage.h"
 #include "EditorPage.h"
+#include "HeaderBar.h"
+#include "HintSystem.h"
 #include "ProjectPage.h"
 #include "StatusPanel.h"
 #include "Theme.h"
@@ -43,22 +48,25 @@
 
 namespace misuc::ui {
 
+namespace {
+const QLatin1String kSettingsOrg("misuc");
+const QLatin1String kSettingsApp("misuc");
+} // namespace
+
 MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
-  resize(1180, 760);
-  setMinimumSize(960, 620);
+  resize(1280, 800);
+  setMinimumSize(1000, 640);
   setWindowTitle(QStringLiteral("Untitled * - Misuc"));
 
   buildMenus();
 
-  auto* central = new QWidget(this);
-  central->setObjectName(QStringLiteral("central"));
-  auto* root = new QVBoxLayout(central);
-  root->setContentsMargins(0, 0, 0, 0);
-  root->setSpacing(0);
+  // Global header: brand, transport, live status cluster.
+  headerBar_ = new HeaderBar(engine_, this);
+  addToolBar(Qt::TopToolBarArea, headerBar_);
+  headerBar_->setMovable(false);
+  transport_ = headerBar_->transportBar();
 
-  // Top transport bar.
-  transport_ = new TransportBar(engine_, this);
-  root->addWidget(transport_);
+  // Transport wiring (loop, record, metronome/count-in).
   connect(transport_, &TransportBar::loopToggled, this, [this](bool on) {
     if (on) {
       applyLoopToEngine(session_);
@@ -71,72 +79,60 @@ MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
   });
   connect(transport_, &TransportBar::recordToggled, this,
           &MainWindow::onRecordToggled);
+  // The click/count-in button is now a real metronome: it arms the engine's
+  // metronome and count-in lead-in (previously dead UI). Default off so
+  // playback/export stay click-free until the user enables it.
+  connect(transport_, &TransportBar::countInToggled, this,
+          [this](bool on) { engine_.setMetronome(on, 2.f); });
+  engine_.setMetronome(false, 2.f);
 
-  // Middle: nav rail + page stack.
-  auto* middle = new QWidget(central);
-  auto* midLay = new QHBoxLayout(middle);
-  midLay->setContentsMargins(0, 0, 0, 0);
-  midLay->setSpacing(0);
+  // Central workspace: tabbed real pages.
+  workspace_ = new QTabWidget(this);
+  workspace_->setObjectName(QStringLiteral("workspaceTabs"));
+  workspace_->setDocumentMode(true);
+  workspace_->setTabPosition(QTabWidget::North);
+  setCentralWidget(workspace_);
 
-  navRail_ = new QWidget(middle);
-  navRail_->setFixedWidth(150);
-  auto* navLay = new QVBoxLayout(navRail_);
-  navLay->setContentsMargins(10, 18, 10, 18);
-  navLay->setSpacing(4);
-
-  // Brand mark: the note-flame logo painted live from the theme accent.
-  navLogo_ = new QLabel(navRail_);
-  navLogo_->setObjectName(QStringLiteral("navLogo"));
-  navLogo_->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
-  navLogo_->setFixedHeight(64);
-  navLay->addWidget(navLogo_);
-  applyBranding();
-  connect(&ThemeEngine::instance(), &ThemeEngine::themeChanged, this,
-          [this] { applyBranding(); });
-
-  auto* navGroup = new QButtonGroup(this);
-  navGroup->setExclusive(true);
-
-  auto addNav = [this, navLay, navGroup](const QString& label, int page) {
-    auto* btn = new QPushButton(label, navRail_);
-    btn->setCheckable(true);
-    btn->setCursor(Qt::PointingHandCursor);
-    btn->setProperty("navPage", page);
-    btn->setObjectName(QStringLiteral("navButton"));
-    if (navGroup->buttons().isEmpty())
-      btn->setChecked(true);
-    navGroup->addButton(btn, page);
-    navLay->addWidget(btn);
-    connect(btn, &QPushButton::clicked, this, [this, page] {
-      pages_->setCurrentIndex(page);
-    });
-  };
-
-  addNav(QStringLiteral("Project"), 0);
-  addNav(QStringLiteral("Editor"), 1);
-  addNav(QStringLiteral("Mixer"), 2);
-  addNav(QStringLiteral("Audio"), 3);
-  addNav(QStringLiteral("Appearance"), 4);
-  navLay->addStretch();
-
-  midLay->addWidget(navRail_);
-  pages_ = new QStackedWidget(middle);
-  midLay->addWidget(pages_, 1);
-  root->addWidget(middle, 1);
-
-  // Status strip.
+  // Status strip: contextual hint bar (left) + audio status (right). Created
+  // before buildPages() so page wiring can register hints.
+  statusBar()->setSizeGripEnabled(false);
+  auto* hintBar = new HintBar(statusBar());
+  hints_ = new HintManager(hintBar, this);
+  statusBar()->addWidget(hintBar, 1);
   status_ = new StatusPanel(engine_, this);
-  root->addWidget(status_);
-
-  setCentralWidget(central);
+  statusBar()->addPermanentWidget(status_);
 
   buildPages();
-  pages_->setCurrentIndex(0);
 
   // Seed the undo history so the first edit has something to revert to.
   undo_.push(session_);
   rebuildMidiScore();
   rebuildClipScore();
+  mixerPage_->syncToEngine();
+
+  // Keyboard shortcuts and layout presets for the modular shell.
+  auto* pianoTab = new QAction(QStringLiteral("Piano Roll"), this);
+  pianoTab->setShortcuts({QKeySequence(Qt::Key_F7)});
+  connect(pianoTab, &QAction::triggered, this, [this] {
+    workspace_->setCurrentWidget(editorPage_);
+    editorPage_->piano()->setFocus(Qt::ShortcutFocusReason);
+  });
+  addAction(pianoTab);
+
+  auto* mixerToggle = new QAction(QStringLiteral("mixerToggle"), this);
+  mixerToggle->setShortcuts(
+      {QKeySequence(Qt::Key_F9), QKeySequence(QStringLiteral("Ctrl+Shift+M"))});
+  connect(mixerToggle, &QAction::triggered, this, [this] {
+    mixerDock_->setVisible(!mixerDock_->isVisible());
+  });
+  addAction(mixerToggle);
+
+  auto* spaceAct = new QAction(QStringLiteral("playStop"), this);
+  spaceAct->setShortcut(QKeySequence(Qt::Key_Space));
+  connect(spaceAct, &QAction::triggered, this, &MainWindow::togglePlayStop);
+  addAction(spaceAct);
+
+  restoreLayout();
 
   // Poll transport + status at 30 Hz.
   timer_ = new QTimer(this);
@@ -186,22 +182,56 @@ void MainWindow::buildMenus() {
   undoCmd_->setEnabled(undo_.canUndo());
   redoCmd_->setEnabled(undo_.canRedo());
 
+  // Workspace: layout presets + panel toggles for the modular shell.
+  QMenu* workspace = menuBar()->addMenu(QStringLiteral("&Workspace"));
+  QActionGroup* presetGroup = new QActionGroup(this);
+  presetGroup->setExclusive(true);
+  const QStringList presets = {QStringLiteral("Default"),
+                               QStringLiteral("Mixing"),
+                               QStringLiteral("Piano Roll"),
+                               QStringLiteral("Recording")};
+  for (const QString& name : presets) {
+    QAction* act =
+        workspace->addAction(name, this, [this, name] { applyLayoutPreset(name); });
+    act->setCheckable(true);
+    presetGroup->addAction(act);
+    if (name == QStringLiteral("Default"))
+      act->setChecked(true);
+  }
+  workspace->addSeparator();
+  workspace->addAction(QStringLiteral("Mixer\tF9"), this, [this] {
+    mixerDock_->setVisible(!mixerDock_->isVisible());
+  });
+
   QMenu* help = menuBar()->addMenu(QStringLiteral("&Help"));
   help->addAction(QStringLiteral("&About Misuc..."), this,
                   &MainWindow::showAbout);
 }
 
 void MainWindow::buildPages() {
+  // Creation order matters: Project before Editor so the first QListWidget in
+  // the window remains the editor's track list (embedded-library contract).
   projectPage_ = new ProjectPage(session_, this);
   editorPage_ = new EditorPage(session_, this);
-  mixerPage_ = new MixerPage(session_, engine_, this);
   audioSettings_ = new AudioSettingsPage(engine_, this);
   themePage_ = new ThemePage(this);
-  pages_->addWidget(projectPage_);
-  pages_->addWidget(editorPage_);
-  pages_->addWidget(mixerPage_);
-  pages_->addWidget(audioSettings_);
-  pages_->addWidget(themePage_);
+  mixerPage_ = new MixerPage(session_, engine_, this);
+
+  workspace_->addTab(projectPage_, QStringLiteral("Project"));
+  workspace_->addTab(editorPage_, QStringLiteral("Editor"));
+  workspace_->addTab(audioSettings_, QStringLiteral("Audio"));
+  workspace_->addTab(themePage_, QStringLiteral("Appearance"));
+
+  // The mixer is a dockable panel, not a tab.
+  mixerDock_ = new QDockWidget(QStringLiteral("Mixer"), this);
+  mixerDock_->setObjectName(QStringLiteral("mixerDock"));
+  mixerDock_->setWidget(mixerPage_);
+  mixerDock_->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::TopDockWidgetArea |
+                              Qt::LeftDockWidgetArea | Qt::RightDockWidgetArea);
+  mixerDock_->setFeatures(QDockWidget::DockWidgetClosable |
+                          QDockWidget::DockWidgetMovable |
+                          QDockWidget::DockWidgetFloatable);
+  addDockWidget(Qt::BottomDockWidgetArea, mixerDock_);
 
   editorPage_->importAudioSink = [this](const QString& src) {
     return stageAudioFile(src);
@@ -224,6 +254,25 @@ void MainWindow::buildPages() {
   // Note audition: preview the pitch immediately, even while stopped.
   connect(editorPage_->piano(), &PianoRoll::audition, this,
           [this](double freq, float vel) { engine_.previewNote(freq, vel); });
+
+  // Wire contextual hints over the chrome and workspace controls.
+  const auto& th = ThemeEngine::instance();
+  Q_UNUSED(th);
+  hints_->registerHint(projectPage_, QStringLiteral("Project"),
+                       QStringLiteral("Project name, tempo and time signature"),
+                       QStringLiteral("Ctrl+N/O/S"));
+  hints_->registerHint(editorPage_, QStringLiteral("Piano Roll"),
+                       QStringLiteral("Draw and edit MIDI notes"),
+                       QStringLiteral("F7"));
+  hints_->registerHint(mixerPage_, QStringLiteral("Mixer"),
+                       QStringLiteral("Per-track gain/pan/mute/solo and meters"),
+                       QStringLiteral("F9"));
+  hints_->registerHint(audioSettings_, QStringLiteral("Audio Settings"),
+                       QStringLiteral("Device, sample rate, buffer and monitoring"),
+                       QString(), nullptr);
+  hints_->registerHint(themePage_, QStringLiteral("Appearance"),
+                       QStringLiteral("Theme presets, accent and glass"),
+                       QString(), nullptr);
 
   mixerPage_->syncToEngine();
 }
@@ -403,10 +452,11 @@ QString MainWindow::stageAudioFile(const QString& src) const {
 }
 
 void MainWindow::poll() {
-  transport_->refresh();
+  headerBar_->refresh();
   status_->refresh();
   feedPlayhead();
   mixerPage_->pollMeters();
+  hints_->refresh();
 }
 
 void MainWindow::feedPlayhead() {
@@ -426,12 +476,47 @@ void MainWindow::paintEvent(QPaintEvent*) {
   p.fillRect(rect(), theme::kBackground);
 }
 
-void MainWindow::applyBranding() {
-  if (!navLogo_)
-    return;
-  const QPixmap pm = logoPixmap(56, theme::kAccent, theme::kAccentSoft);
-  navLogo_->setPixmap(pm.scaled(56, 56, Qt::KeepAspectRatio,
-                                Qt::SmoothTransformation));
+void MainWindow::togglePlayStop() {
+  if (engine_.isTransportPlaying())
+    engine_.pause();
+  else
+    engine_.play(false);
+}
+
+void MainWindow::applyLayoutPreset(const QString& name) {
+  // Real layout changes: dock visibility + active editor tab per workflow.
+  if (name == QStringLiteral("Piano Roll")) {
+    mixerDock_->setVisible(false);
+    workspace_->setCurrentWidget(editorPage_);
+  } else if (name == QStringLiteral("Recording")) {
+    mixerDock_->setVisible(true);
+    workspace_->setCurrentWidget(editorPage_);
+  } else { // Default / Mixing
+    mixerDock_->setVisible(true);
+    workspace_->setCurrentWidget(projectPage_);
+  }
+}
+
+void MainWindow::persistLayout() {
+  QSettings settings(kSettingsOrg, kSettingsApp);
+  settings.setValue(QStringLiteral("workspace/state"), saveState());
+  settings.setValue(QStringLiteral("workspace/tab"),
+                    workspace_->currentIndex());
+  settings.setValue(QStringLiteral("workspace/size"), size());
+}
+
+void MainWindow::restoreLayout() {
+  QSettings settings(kSettingsOrg, kSettingsApp);
+  const QVariant state = settings.value(QStringLiteral("workspace/state"));
+  if (state.isValid())
+    restoreState(state.toByteArray());
+  const QVariant tab = settings.value(QStringLiteral("workspace/tab"));
+  if (tab.isValid() && tab.toInt() >= 0 && tab.toInt() < workspace_->count())
+    workspace_->setCurrentIndex(tab.toInt());
+  const QVariant size = settings.value(QStringLiteral("workspace/size"));
+  const QSize saved = size.toSize();
+  if (saved.isValid() && !saved.isEmpty())
+    resize(saved);
 }
 
 void MainWindow::showAbout() {
@@ -444,6 +529,8 @@ void MainWindow::closeEvent(QCloseEvent* event) {
     event->ignore();
     return;
   }
+  if (workspace_)
+    persistLayout();
   event->accept();
 }
 
@@ -592,6 +679,8 @@ void MainWindow::updateWindowTitle() {
     title += QStringLiteral(" *");
   title += QStringLiteral(" - Misuc");
   setWindowTitle(title);
+  if (headerBar_)
+    headerBar_->setProjectName(name.isEmpty() ? QStringLiteral("Untitled") : name);
 }
 
 bool MainWindow::confirmDiscard() {

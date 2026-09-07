@@ -93,6 +93,11 @@ public:
     loopEndBeats_ = endBeats;
   }
 
+  // Master bus gain (dB) persisted with the project. v3 schema: additive
+  // transport.masterGainDb with a 0.0 dB default, so old documents still load.
+  float masterGainDb() const { return masterGainDb_; }
+  void setMasterGainDb(float db) { masterGainDb_ = db; }
+
   // Tracks ----------------------------------------------------------------
   const std::vector<Track>& tracks() const { return tracks_; }
   std::vector<Track>& tracks() { return tracks_; }
@@ -137,6 +142,7 @@ private:
   bool loopMode_ = false;
   double loopStartBeats_ = 0.0;
   double loopEndBeats_ = 4.0;
+  float masterGainDb_ = 0.0f;
   std::vector<Track> tracks_;
   uint32_t trackCounter_ = 0;
   uint32_t clipCounter_ = 0;

@@ -76,6 +76,7 @@ std::string Session::toJson() const {
   transportObj.emplace("loopMode", Json(loopMode_));
   transportObj.emplace("loopStartBeats", Json(loopStartBeats_));
   transportObj.emplace("loopEndBeats", Json(loopEndBeats_));
+  transportObj.emplace("masterGainDb", Json(static_cast<double>(masterGainDb_)));
   root.emplace("transport", Json(std::move(transportObj)));
 
   Json::Array tracks;
@@ -153,6 +154,8 @@ Session Session::fromJson(const std::string& text) {
     if (auto f = t.find("loopEndBeats"); f != t.end() && f->second.isNumber())
       le = f->second.number();
     s.setLoop(loopMode, ls, le);
+    if (auto f = t.find("masterGainDb"); f != t.end() && f->second.isNumber())
+      s.setMasterGainDb(static_cast<float>(f->second.number()));
   }
 
   if (auto f = root.find("metadata"); f != root.end() && f->second.isObject()) {

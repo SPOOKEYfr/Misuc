@@ -17,6 +17,9 @@ enum class ControlKind : uint32_t {
   PreviewNote = 8, // d0 = freq, f0 = velocity gain (audition a note now)
   Loop        = 9, // f0 = enabled(0/1), d0 = startBeats, d1 = endBeats
   Record      = 10, // f0 = 1 start capture, 0 = stop capture (audio input)
+  Seek        = 11, // d0 = target beat; jump the transport playhead there
+  PreviewSample = 12, // f0 = channels (1/2); arm a published one-shot sample
+  ContentEnd  = 13, // d0 = arrangement end in beats; normal playback stops there
 };
 
 struct alignas(8) ControlMessage {

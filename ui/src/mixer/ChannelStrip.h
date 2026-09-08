@@ -12,6 +12,7 @@ namespace misuc::ui {
 class Fader;
 class Knob;
 class VerticalMeter;
+class HintManager;
 
 // One mixer channel: name + color dot, pan knob, mute/solo, stereo meter,
 // fader, and a dB readout. The strip owns no session state — it reports raw
@@ -32,6 +33,10 @@ public:
   void setSelected(bool on);
   void setLevels(float peakL, float rmsL, float peakR, float rmsR,
                  bool clipped);
+
+  // Registers exact-control hints (volume/pan/mute/solo/meter) on the strip's
+  // own widgets so the HintBar mirrors the real mixer value under the cursor.
+  void attachHints(HintManager* hints);
 
 signals:
   void activated(const QString& id);

@@ -11,6 +11,7 @@
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
+#include <QPointer>
 #include <QSettings>
 #include <QSlider>
 #include <QStandardItemModel>
@@ -266,6 +267,36 @@ ChannelRack::ChannelRack(QWidget* parent) : QWidget(parent) {
   cl->addWidget(delBtn);
   cl->addSpacing(4);
   cl->addWidget(resetBtn);
+  cl->addSpacing(4);
+  placePatternBtn_ = new QToolButton(chrome);
+  placePatternBtn_->setToolTip(QStringLiteral(
+      "Place Pattern: turn this bank's steps into a real MIDI region in the "
+      "arrangement (editable in piano roll)"));
+  placePatternBtn_->setIcon(icons::make(icons::IconId::Patterns, theme::kTextDim, 16));
+  placePatternBtn_->setAutoRaise(true);
+  placePatternBtn_->setFixedSize(26, 26);
+  placePatternBtn_->setCursor(Qt::PointingHandCursor);
+  placePatternBtn_->setFocusPolicy(Qt::NoFocus);
+  connect(placePatternBtn_, &QToolButton::clicked, this,
+          &ChannelRack::placePattern);
+  cl->addWidget(placePatternBtn_);
+  cl->addSpacing(4);
+  patternPlayBtn_ = new QToolButton(chrome);
+  patternPlayBtn_->setObjectName(QStringLiteral("patternPlay"));
+  patternPlayBtn_->setToolTip(QStringLiteral(
+      "Pattern Play: loop this bank through the audio engine"));
+  patternPlayBtn_->setCheckable(true);
+  patternPlayBtn_->setIcon(icons::make(icons::IconId::Play, theme::kTextDim, 16));
+  patternPlayBtn_->setStyleSheet(
+      QStringLiteral("QToolButton { color: %1; } "
+                     "QToolButton:checked { color: %2; border: 1px solid %3; "
+                     "border-radius: 3px; background: %4; }")
+          .arg(theme::kTextDim.name(), theme::kAccentActive.name(),
+               theme::kAccent.name(), theme::kAccentSoft.name()));
+  connect(patternPlayBtn_, &QToolButton::toggled, this, [this](bool on) {
+    Q_EMIT patternLiveChanged(on);
+  });
+  cl->addWidget(patternPlayBtn_);
   lay->addWidget(chrome);
 
   view_ = new QTableView(this);
@@ -338,6 +369,10 @@ double ChannelRack::previewFreq(int row) const {
   return 220.0;
 }
 
+bool ChannelRack::patternLive() const {
+  return patternPlayBtn_ && patternPlayBtn_->isChecked();
+}
+
 QString ChannelRack::channelName(int row) const {
   if (row < 0 || row >= channels_.size())
     return QString();
@@ -349,6 +384,8 @@ void ChannelRack::previewCurrent() {
     return;
   Q_EMIT previewRequested(current_);
 }
+
+void ChannelRack::placePattern() { Q_EMIT placePatternRequested(); }
 
 void ChannelRack::resetToDefaults() {
   restoreDefaults();
@@ -379,6 +416,13 @@ void ChannelRack::attachHints(HintManager* hints) {
   hints->registerTool(chromeButtons_[4], QStringLiteral("Reset to Starter Kit"),
                       QStringLiteral("Restore the Kick/Snare/Hi-Hat/Bass/Sampler "
                                      "starter lineup"), QString(), icons::IconId::Undo);
+  hints->registerTool(patternPlayBtn_, QStringLiteral("Pattern Play"),
+                      QStringLiteral("Loop this pattern bank through the audio "
+                                     "engine (mute/solo/volume and swing are "
+                                     "honoured in real time)"),
+                      QString(), icons::IconId::Play,
+                      [this] { return patternLive() ? QStringLiteral("playing")
+                                                   : QString(); });
   for (int i = 0; i < patternButtons_.size(); ++i) {
     const int bank = i;
     hints->registerTool(patternButtons_[i],
@@ -394,12 +438,105 @@ void ChannelRack::attachHints(HintManager* hints) {
   if (swingSlider_)
     hints->registerHint(swingSlider_, QStringLiteral("Swing"),
                         QStringLiteral("Groove swing for the step lanes, stored "
-                                       "per session (0–66%). Drives the "
-                                       "pattern-playback timing the frozen "
-                                       "audio pipeline will realise on unfreeze"),
+                                       "per session (0–66%). Off-beat 16ths are "
+                                       "delayed toward the following step when "
+                                       "Pattern Play is armed"),
                         QString(), [this] {
                           return QStringLiteral("%1%").arg(swing_);
                         });
+
+  // Exact-cell hints over the table: name, mute, solo, step gates, volume and
+  // pan all resolve from the cell under the cursor with live rack state.
+  const QPointer<ChannelRack> self(this);
+  hints->registerCustom(view_, [self](const QPoint& pos) -> std::optional<Hint> {
+    if (self.isNull() || !self->view_)
+      return std::nullopt;
+    QWidget* vp = self->view_->viewport();
+    const QPoint vpos = vp->mapFromParent(pos);
+    if (!vp->rect().contains(vpos))
+      return std::nullopt;
+    const QModelIndex idx = self->view_->indexAt(vpos);
+    if (!idx.isValid())
+      return std::nullopt;
+    const int row = idx.row();
+    const int col = idx.column();
+    if (row < 0 || row >= self->channels_.size())
+      return std::nullopt;
+    const ChannelRack::Channel& ch = self->channels_[row];
+    const QString name = QString::fromStdString(ch.name.toStdString());
+    Hint h;
+    if (col == 0) {
+      h.name = name;
+      h.description = QStringLiteral("Step-sequencer channel · %1").arg(
+          ch.muted ? QStringLiteral("muted") : QStringLiteral("live"));
+      if (ch.muted) h.name += QStringLiteral(" (M)");
+      return h;
+    }
+    if (col == 1) {
+      h.name = name + QStringLiteral(" · Mute");
+      h.description = QStringLiteral("Silence this channel's gates in Pattern Play");
+      h.value = [self, row] {
+        if (self.isNull() || row >= self->channels_.size())
+          return QString();
+        return self->channels_[row].muted ? QStringLiteral("muted")
+                                          : QStringLiteral("off");
+      };
+      return h;
+    }
+    if (col == 2) {
+      h.name = name + QStringLiteral(" · Solo");
+      h.description = QStringLiteral("Isolate this channel in the step pattern");
+      h.value = [self, row] {
+        if (self.isNull() || row >= self->channels_.size())
+          return QString();
+        return self->channels_[row].solo ? QStringLiteral("solo")
+                                         : QStringLiteral("off");
+      };
+      return h;
+    }
+    if (col >= self->stepBase_ && col < self->stepBase_ + kStepCount) {
+      const int step = col - self->stepBase_;
+      h.name = name + QStringLiteral(" · Step %1").arg(step + 1);
+      h.description = QStringLiteral("Gate a one-sixteenth step of pattern %1")
+                          .arg(self->pattern_ + 1);
+      h.value = [self, row, step] {
+        if (self.isNull() || row >= self->channels_.size())
+          return QString();
+        const ChannelRack::Channel& c = self->channels_[row];
+        const int bank = self->pattern_;
+        const bool on =
+            step < c.steps[bank].size() && c.steps[bank][step];
+        return on ? QStringLiteral("gated") : QStringLiteral("off");
+      };
+      return h;
+    }
+    if (col == self->stepBase_ + kStepCount) {
+      h.name = name + QStringLiteral(" · Volume");
+      h.description = QStringLiteral("Channel level heard through the engine");
+      h.value = [self, row] {
+        if (self.isNull() || row >= self->channels_.size())
+          return QString();
+        return QStringLiteral("%1%").arg(
+            int(self->channels_[row].volume * 100.f));
+      };
+      return h;
+    }
+    if (col == self->stepBase_ + kStepCount + 1) {
+      h.name = name + QStringLiteral(" · Pan");
+      h.description = QStringLiteral("Stereo pan of the channel");
+      h.value = [self, row] {
+        if (self.isNull() || row >= self->channels_.size())
+          return QString();
+        const float p = self->channels_[row].pan;
+        const QString d = p < -0.01f ? QStringLiteral("L") :
+                          p > 0.01f  ? QStringLiteral("R")
+                                     : QStringLiteral("C");
+        return d + QString::number(int(std::fabs(p) * 100.f));
+      };
+      return h;
+    }
+    return std::nullopt;
+  });
 }
 
 void ChannelRack::restoreDefaults() {
@@ -441,6 +578,47 @@ void ChannelRack::setSwing(int percent) {
   swing_ = qBound(0, percent, kMaxSwing);
   if (swingSlider_ && swingSlider_->value() != swing_)
     swingSlider_->setValue(swing_);
+  savePersisted();
+}
+
+bool ChannelRack::setStep(int row, int bank, int step, bool on) {
+  if (row < 0 || row >= channels_.size())
+    return false;
+  if (bank < 0 || bank >= kPatternCount)
+    return false;
+  if (step < 0 || step >= kStepCount)
+    return false;
+  channels_[row].steps[bank][step] = on;
+  rebuildTable();
+  Q_EMIT edited();
+  savePersisted();
+  return true;
+}
+
+void ChannelRack::setMuted(int row, bool on) {
+  if (row < 0 || row >= channels_.size())
+    return;
+  channels_[row].muted = on;
+  rebuildTable();
+  Q_EMIT edited();
+  savePersisted();
+}
+
+void ChannelRack::setSolo(int row, bool on) {
+  if (row < 0 || row >= channels_.size())
+    return;
+  channels_[row].solo = on;
+  rebuildTable();
+  Q_EMIT edited();
+  savePersisted();
+}
+
+void ChannelRack::setVolume(int row, float v) {
+  if (row < 0 || row >= channels_.size())
+    return;
+  channels_[row].volume = qBound(0.0f, v, 1.0f);
+  rebuildTable();
+  Q_EMIT edited();
   savePersisted();
 }
 

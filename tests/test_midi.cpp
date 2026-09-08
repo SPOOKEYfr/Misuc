@@ -13,6 +13,7 @@ using misuc::dsp::MidiNote;
 using misuc::dsp::MidiPlayer;
 using misuc::dsp::midiNoteToFreq;
 using misuc::engine::buildMidiScore;
+using misuc::project::MidiRegion;
 using misuc::project::NoteEvent;
 using misuc::project::Session;
 using misuc::project::Track;
@@ -163,6 +164,47 @@ TEST_CASE(midi_score_build_mapping) {
     }
   TEST_ASSERT(std::fabs(maxGain - 1.f) < 1e-4f);
   TEST_ASSERT(std::fabs(minGain - (64.f / 127.f)) < 1e-4f);
+}
+
+// Regions are the primary note container: buildMidiScore must flatten region
+// notes to absolute beats (region.start + local), ignore legacy notes when any
+// region exists, and fall back to legacy notes when none do.
+TEST_CASE(midi_score_regions_flatten) {
+  Session s;
+  const std::string tid = s.addTrack("Riff");
+  Track* t = s.findTrack(tid);
+
+  const std::string r1 = s.addRegion(tid, "A", 4.0, 4.0);
+  const std::string r2 = s.addRegion(tid, "B", 8.0, 2.0);
+  MidiRegion* a = s.findRegion(tid, r1);
+  MidiRegion* b = s.findRegion(tid, r2);
+  TEST_ASSERT(a && b);
+  a->notes.push_back(NoteEvent{0, 60, 100, 0.0, 1.0});
+  a->notes.push_back(NoteEvent{0, 62, 90, 2.0, 1.0});
+  b->notes.push_back(NoteEvent{0, 64, 80, 0.5, 0.5});
+  // A legacy note must be ignored now that regions exist.
+  t->notes.push_back(NoteEvent{0, 50, 100, 0.0, 1.0});
+
+  std::vector<MidiNote> score;
+  buildMidiScore(s, score);
+  TEST_ASSERT(score.size() == 3);
+  std::vector<double> starts;
+  for (const MidiNote& n : score) {
+    TEST_ASSERT(n.track == 0);
+    starts.push_back(n.startBeats);
+  }
+  std::sort(starts.begin(), starts.end());
+  TEST_ASSERT(std::fabs(starts[0] - 4.0) < 1e-9);
+  TEST_ASSERT(std::fabs(starts[1] - 6.0) < 1e-9);
+  TEST_ASSERT(std::fabs(starts[2] - 8.5) < 1e-9);
+
+  // Remove the regions: playback falls back to the legacy absolute list.
+  TEST_ASSERT(s.removeRegion(tid, r1));
+  TEST_ASSERT(s.removeRegion(tid, r2));
+  buildMidiScore(s, score);
+  TEST_ASSERT(score.size() == 1);
+  TEST_ASSERT(std::fabs(score[0].startBeats - 0.0) < 1e-9);
+  TEST_ASSERT(std::fabs(midiNoteToFreq(50) - score[0].freq) < 1e-6);
 }
 
 TEST_CASE(midi_empty_score_silent) {

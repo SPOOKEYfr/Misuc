@@ -275,6 +275,22 @@ void AudioSettingsPage::restartStream() {
   startWith(lastConfig_);
 }
 
+void AudioSettingsPage::autoStart() {
+  if (engine_.isRunning())
+    return;
+  const auto outs = engine_.backend()->enumerateDevices(false);
+  misuc::engine::AudioConfig cfg;
+  if (!outs.empty())
+    cfg.deviceId = outs.front().id;
+  cfg.sampleRate = 48000;
+  cfg.bufferSize = 256;
+  cfg.inputChannels = 0;
+  if (startWith(cfg)) {
+    lastConfig_ = cfg;
+    lastConfigValid_ = true;
+  }
+}
+
 void AudioSettingsPage::openDevice() { applyConfig(); }
 
 void AudioSettingsPage::closeDevice() {

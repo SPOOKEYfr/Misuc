@@ -2,6 +2,7 @@
 
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QPointer>
 #include <QScrollArea>
 #include <QVBoxLayout>
 
@@ -12,6 +13,8 @@
 #include <misuc/engine/project/Session.h>
 
 #include "../Theme.h"
+#include "../HintSystem.h"
+#include "../branding/Icons.h"
 #include "ChannelStrip.h"
 #include "Fader.h"
 #include "Knob.h"
@@ -26,16 +29,17 @@ namespace {
 // Per-track accent colors (rotated by track index). The first channel follows
 // the active theme accent instead of a fixed literal so the mixer never
 // hardcodes brand colors; the rest stay on a stable rotation tuned to the
-// design system (desaturated slate/violet families — no rainbow/gaming look).
+// design system — a monochrome violet/slate ladder on near-black, so the
+// mixer reads black-first with violet second (no rainbow/gaming look).
 const QColor kStripColors[] = {
     QColor(0x8f, 0x7b, 0xfa), // violet accent
     QColor(0x9a, 0x8f, 0xc8), // muted lavender
-    QColor(0x8a, 0xa5, 0xb0), // slate teal
-    QColor(0x8f, 0xa0, 0x8c), // sage
-    QColor(0x9e, 0x95, 0x9b), // mauve
-    QColor(0x82, 0x8f, 0xa8), // steel blue
-    QColor(0xb0, 0x9f, 0x8b), // clay
-    QColor(0x98, 0xa0, 0x94), // muted grey-teal
+    QColor(0x6a, 0x63, 0x82), // dusky violet
+    QColor(0x51, 0x54, 0x63), // cool slate
+    QColor(0x5e, 0x57, 0x68), // mauve-gray
+    QColor(0x48, 0x4d, 0x58), // neutral graphite
+    QColor(0x63, 0x5f, 0x73), // plum-slate
+    QColor(0x57, 0x58, 0x62), // stone gray
 };
 } // namespace
 
@@ -91,6 +95,47 @@ QColor MixerPage::stripColor(size_t index) const {
 
 void MixerPage::refresh() { rebuildStrips(); }
 
+void MixerPage::attachHints(HintManager* hints) {
+  hints_ = hints;
+  if (!hints)
+    return;
+  for (ChannelStrip* s : strips_)
+    s->attachHints(hints);
+  if (masterFader_) {
+    const QPointer<MixerPage> self(this);
+    auto dbText = [](float db) {
+      return db <= -90.f ? QStringLiteral("-inf")
+                         : QString::number(db, 'f', 1) + QStringLiteral(" dB");
+    };
+    hints->registerTool(masterFader_, QStringLiteral("Master · Volume"),
+                        QStringLiteral("Master bus gain applied to the whole mix"),
+                        QString(), icons::IconId::None,
+                        [self, dbText]() -> QString {
+                          if (self.isNull() || !self->masterFader_)
+                            return QString();
+                          return dbText(self->masterFader_->valueDb());
+                        });
+    if (masterMeter_) {
+      hints->registerTool(masterMeter_, QStringLiteral("Master · Level"),
+                          QStringLiteral("Master bus output, peak + RMS stereo"),
+                          QString(), icons::IconId::None,
+                          [self]() -> QString {
+                            if (self.isNull() || !self->masterMeter_)
+                              return QString();
+                            auto* m = self->masterMeter_;
+                            auto db = [](float x) {
+                              return x > 1e-6f ? 20.f * std::log10(x) : -120.f;
+                            };
+                            return QStringLiteral("L %1 / R %2%3")
+                                .arg(db(static_cast<float>(m->peakL())), 0, 'f', 1)
+                                .arg(db(static_cast<float>(m->peakR())), 0, 'f', 1)
+                                .arg(m->clipped() ? QStringLiteral(" CLIP")
+                                                  : QString());
+                          });
+    }
+  }
+}
+
 int MixerPage::trackIndex(const QString& id) const {
   int i = 0;
   for (const Track& t : session_->tracks()) {
@@ -136,6 +181,7 @@ void MixerPage::rebuildStrips() {
             &MixerPage::onGainChanged);
     connect(strip, &ChannelStrip::muteToggled, this, &MixerPage::onMuteToggled);
     connect(strip, &ChannelStrip::soloToggled, this, &MixerPage::onSoloToggled);
+    strip->attachHints(hints_);
     lay->addWidget(strip);
     strips_.push_back(strip);
     ++i;

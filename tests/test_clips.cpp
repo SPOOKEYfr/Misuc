@@ -462,3 +462,66 @@ TEST_CASE(render_to_wav_offline) {
     tail = std::max(tail, std::fabs(mix.samples[2 * i]));
   TEST_ASSERT(tail < 1e-3f);
 }
+
+// A published one-shot sample preview must render through the wall-clock path
+// even while the transport is stopped (browser audition), with a click-free
+// attack. Headless: we drive process() directly, exactly like clipboard
+// playback, so no sound daemon is required.
+TEST_CASE(preview_sample_headless) {
+  AudioEngine engine(std::make_unique<misuc::engine::PipeWireBackend>());
+  engine.setGroove(false);
+  engine.setMetronome(false, 0.0f);
+  engine.setTempo(120.0);
+
+  // 0.5 s of 440 Hz mono at amplitude 0.5, 48000 Hz.
+  constexpr uint32_t kSr = 48000;
+  constexpr uint32_t kFrames = kSr / 2;
+  std::vector<float> s;
+  s.reserve(kFrames);
+  for (uint32_t i = 0; i < kFrames; ++i)
+    s.push_back(0.5f * static_cast<float>(
+                         std::sin(2.0 * 3.14159265358979 * 440.0 *
+                                  static_cast<double>(i) / kSr)));
+  engine.previewSample(s, 1);
+
+  std::vector<float> out(kSr * 2, 0.f);
+  engine.process(nullptr, 0, out.data(), 2, kSr, 0, kSr);
+
+  // The first frame after the attack edge should already carry the tone.
+  float early = 0.f;
+  for (size_t i = 512; i < 16000; ++i)
+    early = std::max(early, std::fabs(out[2 * i]));
+  TEST_ASSERT(early > 0.05f);
+  // The one-shot ends when the buffer is exhausted; the tail must be silent.
+  float tail = 0.f;
+  for (size_t i = 36000; i < 47000; ++i)
+    tail = std::max(tail, std::fabs(out[2 * i]));
+  TEST_ASSERT(tail < 1e-3f);
+}
+
+// Ruler seek: the playhead jumps to the clicked beat while stopped, and Play
+// resumes from the caret rather than rewinding to bar 1. Headless via process().
+TEST_CASE(seek_transport_headless) {
+  AudioEngine engine(std::make_unique<misuc::engine::PipeWireBackend>());
+  engine.setGroove(false);
+  engine.setMetronome(false, 0.0f);
+  engine.setTempo(120.0); // 24000 frames per beat @48k
+
+  std::vector<float> out(4096 * 2, 0.f);
+  engine.process(nullptr, 0, out.data(), 2, 4096, 0, 48000);
+  TEST_ASSERT(engine.playheadSamples() == 0);
+
+  // Seek to beat 2 while stopped.
+  engine.seekToBeat(2.0);
+  engine.process(nullptr, 0, out.data(), 2, 4096, 0, 48000);
+  TEST_ASSERT(engine.playheadSamples() == 48000);
+  TEST_ASSERT(!engine.isTransportPlaying());
+
+  // Play must continue from the caret, not restart at bar 1.
+  engine.play(false);
+  engine.process(nullptr, 0, out.data(), 2, 4096, 0, 48000);
+  TEST_ASSERT(engine.isTransportPlaying());
+  TEST_ASSERT(engine.playheadSamples() > 48000);
+
+  engine.stop();
+}

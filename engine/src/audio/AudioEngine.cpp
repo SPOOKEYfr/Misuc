@@ -387,6 +387,48 @@ void AudioEngine::previewNote(double freq, float velocity) {
     controlsDropped_.fetch_add(1);
 }
 
+void AudioEngine::seekToBeat(double beat) {
+  if (!(beat >= 0.0))
+    return;
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::Seek);
+  m.d0 = beat;
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
+void AudioEngine::setContentEnd(double endBeats) {
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::ContentEnd);
+  m.d0 = endBeats >= 0.0 ? endBeats : 0.0;
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
+void AudioEngine::previewSample(std::vector<float> interleaved,
+                                uint32_t channels) {
+  if (channels < 1 || channels > 2 || interleaved.empty())
+    return;
+  // Rate-limit the published buffer size so a stray multi-minute file can't
+  // chew through the triple slots; previews are short auditions.
+  const size_t cap = static_cast<size_t>(sampleRate_) * 30 * channels;
+  if (interleaved.size() > cap)
+    interleaved.resize(cap);
+  const int c = previewPublishSlot_;
+  previewPublishSlot_ = (previewPublishSlot_ + 1) % 3;
+  PreviewSlot& slot = previewSlots_[c];
+  while (slot.refs.load(std::memory_order_acquire) != 0)
+    std::this_thread::yield();
+  slot.samples = std::move(interleaved);
+  std::atomic_thread_fence(std::memory_order_release);
+  livePreviewSlot_.store(c, std::memory_order_release);
+  ControlMessage m;
+  m.type = static_cast<uint32_t>(ControlKind::PreviewSample);
+  m.f0 = static_cast<float>(channels);
+  if (!controlQueue_->push(m))
+    controlsDropped_.fetch_add(1);
+}
+
 bool AudioEngine::isTransportPlaying() const noexcept {
   return snapshot_.playing.load(std::memory_order_relaxed);
 }
@@ -535,6 +577,29 @@ void AudioEngine::drainControls() noexcept {
         recordingActive_.store(on, std::memory_order_release);
         break;
       }
+      case ControlKind::Seek: {
+        // Jump the playhead to the requested beat; keep the play/pause state
+        // (playing continues from the new spot, paused stays paused).
+        const double fpb = transport_.framesPerBeat();
+        transport_.setPosition(
+            static_cast<uint64_t>(std::max(0.0, m.d0) * fpb + 0.5));
+        if (!transport_.isPlaying())
+          snapshot_.playheadSamples.store(transport_.positionFrames(),
+                                          std::memory_order_relaxed);
+        break;
+      }
+      case ControlKind::ContentEnd:
+        contentEndBeats_ = m.d0;
+        break;
+      case ControlKind::PreviewSample: {
+        const int ps = livePreviewSlot_.load(std::memory_order_acquire);
+        if (ps < 0 || previewSlots_[ps].samples.empty())
+          break;
+        previewActive_ = true;
+        previewChannels_ = m.f0 > 1.f ? 2u : 1u;
+        previewStartWall_ = wallFrames_;
+        break;
+      }
     }
   }
 }
@@ -547,8 +612,15 @@ void AudioEngine::beginPlay() noexcept {
     transport_.setPosition(0);
     return;
   }
+  // A published empty arrangement has nothing to play: don't start so playback
+  // never silently runs a bare timeline. Loop playback (rack pattern live) is
+  // unaffected — it publishes a positive content end first.
+  if (contentEndBeats_ == 0.0)
+    return;
+  // Start from the current caret: Stop rewinds to 0, a ruler seek parks the
+  // caret wherever the user clicked, and Play resumes from there (DAW
+  // behaviour). Counting-in starts clean from bar 1 in the path above.
   state_ = PlayState::Playing;
-  transport_.setPosition(0);
   transport_.play();
   metronome_.setTicking(metronomeEnabled_);
   midiPlayer_.reset();
@@ -641,9 +713,20 @@ void AudioEngine::process(const float* input, uint32_t inputChannels,
 
   const uint64_t songPos = transport_.positionFrames(); // block-start position
 
+  // Content-end stop (computed after advance, applied after the per-track mix
+  // so the block that straddles the arrangement end still renders its audio).
+  bool stopAtEnd = false;
+  uint64_t endFrames = 0;
+
   if (state_ == PlayState::Playing) {
     const uint64_t startPos = songPos;
     transport_.advance(frames);
+    if (!transport_.isLooping() && contentEndBeats_ >= 0.0) {
+      endFrames = static_cast<uint64_t>(
+          contentEndBeats_ * transport_.framesPerBeat() + 0.5);
+      if (transport_.positionFrames() >= endFrames)
+        stopAtEnd = true;
+    }
     metronome_.setTicking(metronomeEnabled_);
     if (outputChannels >= 2) {
       metronome_.render(&output[0], &output[1], frames, outputChannels);
@@ -662,11 +745,19 @@ void AudioEngine::process(const float* input, uint32_t inputChannels,
                       outputChannels >= 2 ? &output[1] : &output[0], frames,
                       outputChannels);
     if (metronome_.countInComplete()) {
-      state_ = PlayState::Playing;
-      countPending_ = false;
-      metronome_.clearCountIn();
-      transport_.play();
-      snapshot_.playing.store(true, std::memory_order_relaxed);
+      if (contentEndBeats_ == 0.0) {
+        // The count-in finished but the arrangement is empty: stand down.
+        state_ = PlayState::Stopped;
+        countPending_ = false;
+        metronome_.clearCountIn();
+        metronome_.setTicking(false);
+      } else {
+        state_ = PlayState::Playing;
+        countPending_ = false;
+        metronome_.clearCountIn();
+        transport_.play();
+        snapshot_.playing.store(true, std::memory_order_relaxed);
+      }
     }
   }
 
@@ -782,6 +873,63 @@ void AudioEngine::process(const float* input, uint32_t inputChannels,
     else
       midiPlayer_.renderPreviews(&output[0], &output[0], frames, outputChannels,
                                  wall0);
+
+    // One-shot sample audition (browser preview). Renders against the wall
+    // clock with a short attack/release so a preview never clicks; stops once
+    // the published buffer has been consumed.
+    if (previewActive_) {
+      const int ps = livePreviewSlot_.load(std::memory_order_acquire);
+      PreviewSlot* pv =
+          (ps >= 0 && !previewSlots_[ps].samples.empty()) ? &previewSlots_[ps]
+                                                          : nullptr;
+      if (!pv) {
+        previewActive_ = false;
+      } else {
+        pv->refs.fetch_add(1, std::memory_order_relaxed);
+        const uint32_t ch = previewChannels_;
+        const uint32_t outCh = outputChannels > 1 ? 2 : 1;
+        const uint64_t totalF =
+            static_cast<uint64_t>(pv->samples.size()) / ch;
+        const uint32_t edge =
+            static_cast<uint32_t>(std::min<uint64_t>(256, totalF / 2));
+        for (uint32_t i = 0; i < frames; ++i) {
+          const uint64_t idx = (wall0 + i) - previewStartWall_;
+          if (idx >= totalF) {
+            previewActive_ = false;
+            break;
+          }
+          const size_t s0 = static_cast<size_t>(idx) * ch;
+          float l = pv->samples[s0];
+          float r = ch == 2 ? pv->samples[s0 + 1] : l;
+          if (outCh == 1)
+            l = r = 0.5f * (l + r);
+          float env = 1.f;
+          if (idx < edge)
+            env = static_cast<float>(idx + 1) / edge;
+          else if (idx >= totalF - edge)
+            env = static_cast<float>(totalF - idx) / edge;
+          if (outputChannels >= 2) {
+            output[i * outputChannels] += l * env;
+            output[i * outputChannels + 1] += r * env;
+          } else {
+            output[i] += 0.5f * (l + r) * env;
+          }
+        }
+        pv->refs.fetch_sub(1, std::memory_order_release);
+      }
+    }
+  }
+
+  // Park the caret exactly at the content end and stop normal playback. The
+  // audio for the straddling block has already been rendered above.
+  if (stopAtEnd) {
+    transport_.setPosition(endFrames);
+    transport_.pause();
+    state_ = PlayState::Stopped;
+    metronome_.setTicking(false);
+    metronome_.clearCountIn();
+    midiPlayer_.reset();
+    snapshot_.playing.store(false, std::memory_order_relaxed);
   }
 
   if (testTone_)

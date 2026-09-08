@@ -6,6 +6,7 @@
 #include <misuc/engine/project/Session.h>
 
 using misuc::core::Json;
+using misuc::project::MidiRegion;
 using misuc::project::NoteEvent;
 using misuc::project::Session;
 using misuc::project::Track;
@@ -99,12 +100,82 @@ TEST_CASE(session_tracks_roundtrip) {
   TEST_ASSERT(loaded.tracks()[0].name == "Bass");
   TEST_ASSERT(loaded.tracks()[0].muted == false);
   TEST_ASSERT(std::fabs(loaded.tracks()[0].gainDb - (-3.0f)) < 0.001f);
-  TEST_ASSERT(loaded.tracks()[0].notes.size() == 2);
-  TEST_ASSERT(loaded.tracks()[0].notes[0].pitch == 36);
-  TEST_ASSERT(loaded.tracks()[0].notes[0].startBeats == 0.0);
-  TEST_ASSERT(loaded.tracks()[0].notes[0].durationBeats == 2.0);
-  TEST_ASSERT(loaded.tracks()[0].notes[1].velocity == 90);
-  TEST_ASSERT(loaded.tracks()[0].notes[1].startBeats == 2.0);
+  // Legacy whole-track notes are migrated into a single region at load: the
+  // flat absolute list becomes a region at the span's start with local note
+  // offsets, and the legacy list is emptied so playable state is unambiguous.
+  TEST_ASSERT(loaded.tracks()[0].regions.size() == 1);
+  TEST_ASSERT(loaded.tracks()[0].notes.empty());
+  if (loaded.tracks()[0].regions.size() == 1) {
+    const MidiRegion& mig = loaded.tracks()[0].regions[0];
+    TEST_ASSERT(mig.startBeats == 0.0);
+    TEST_ASSERT(mig.notes.size() == 2);
+    TEST_ASSERT(mig.notes[0].pitch == 36);
+    TEST_ASSERT(mig.notes[0].startBeats == 0.0);
+    TEST_ASSERT(mig.notes[0].durationBeats == 2.0);
+    TEST_ASSERT(mig.notes[1].pitch == 43);
+    TEST_ASSERT(mig.notes[1].startBeats == 2.0);
+    TEST_ASSERT(mig.notes[1].velocity == 90);
+  }
+}
+
+TEST_CASE(session_regions_roundtrip) {
+  Session s;
+  const std::string tid = s.addTrack("Lead");
+  const std::string rid =
+      s.addRegion(tid, "Main Riff", 8.0, 4.0);
+  TEST_ASSERT(!rid.empty());
+  MidiRegion* r = s.findRegion(tid, rid);
+  TEST_ASSERT(r != nullptr);
+  TEST_ASSERT(r->name == "Main Riff");
+  TEST_ASSERT(r->startBeats == 8.0);
+  TEST_ASSERT(r->durationBeats == 4.0);
+  r->notes.push_back(NoteEvent{0, 72, 100, 0.0, 0.5});
+  r->notes.push_back(NoteEvent{0, 76, 90, 1.0, 1.0});
+
+  const Session loaded = Session::fromJson(s.toJson());
+  TEST_ASSERT(loaded.tracks().size() == 1);
+  TEST_ASSERT(loaded.tracks()[0].regions.size() == 1);
+  if (loaded.tracks()[0].regions.empty())
+    return;
+  const MidiRegion& rr = loaded.tracks()[0].regions[0];
+  TEST_ASSERT(rr.id == rid);
+  TEST_ASSERT(rr.name == "Main Riff");
+  TEST_ASSERT(rr.startBeats == 8.0);
+  TEST_ASSERT(rr.durationBeats == 4.0);
+  TEST_ASSERT(rr.notes.size() == 2);
+  TEST_ASSERT(rr.notes[0].pitch == 72);
+  TEST_ASSERT(rr.notes[0].startBeats == 0.0);
+  TEST_ASSERT(rr.notes[1].startBeats == 1.0);
+  // A track with regions keeps its (empty) legacy list; no migration runs.
+  TEST_ASSERT(loaded.tracks()[0].notes.empty());
+}
+
+TEST_CASE(session_region_helpers) {
+  Session s;
+  const std::string tid = s.addTrack("Drums");
+  const std::string rid = s.addRegion(tid, "Kit Loop", 4.0, 2.0);
+  TEST_ASSERT(!rid.empty());
+  MidiRegion* r = s.findRegion(tid, rid);
+  TEST_ASSERT(r != nullptr);
+  r->notes.push_back(NoteEvent{0, 36, 110, 0.0, 1.0});
+  r->notes.push_back(NoteEvent{0, 38, 110, 0.5, 0.5});
+
+  const std::string copyId = s.duplicateRegion(tid, rid);
+  TEST_ASSERT(!copyId.empty());
+  TEST_ASSERT(copyId != rid);
+  TEST_ASSERT(s.findRegion(tid, copyId) != nullptr);
+  const MidiRegion& copy = *s.findRegion(tid, copyId);
+  TEST_ASSERT(copy.startBeats == 4.0 + 2.0); // placed right after the source
+  TEST_ASSERT(copy.notes.size() == 2);
+  TEST_ASSERT(copy.notes[0].startBeats == 0.0); // local coords preserved
+
+  TEST_ASSERT(s.removeRegion(tid, copyId));
+  TEST_ASSERT(s.findRegion(tid, copyId) == nullptr);
+  TEST_ASSERT(s.findRegion(tid, rid) != nullptr);
+  // Missing inputs fail gracefully.
+  TEST_ASSERT(s.addRegion("nope", "x", 0, 1).empty());
+  TEST_ASSERT(!s.removeRegion(tid, "nope"));
+  TEST_ASSERT(s.duplicateRegion(tid, "nope").empty());
 }
 
 TEST_CASE(session_track_lifecycle) {

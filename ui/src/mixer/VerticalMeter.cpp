@@ -39,7 +39,7 @@ void VerticalMeter::drawBar(QPainter& p, const QRectF& bar, float level,
   const float fy = y1 + (1.f - fill) * (bar.height());
   QLinearGradient g(0, y1, 0, y0);
   g.setColorAt(0.0, theme::kDanger);
-  g.setColorAt(0.35, QColor(0xff, 0xc9, 0x4a));
+  g.setColorAt(0.35, theme::kMeterHot);
   g.setColorAt(1.0, theme::kOk);
   const QRectF fillRect(bar.left(), fy, bar.width(), std::max(1.f, y0 - fy));
   p.fillRect(fillRect, g);

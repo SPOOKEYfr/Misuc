@@ -430,29 +430,30 @@ void HeaderBar::attachHints(HintManager* hints) {
   if (!hints)
     return;
 
-  struct IdDesc { const char* id; const char* name; const char* desc; };
+  struct IdDesc {
+    const char* id;
+    const char* name;
+    const char* desc;
+    const char* shortcut;
+  };
   static const IdDesc kStripInfo[] = {
-      {"playlist", "Workspace: Playlist",
-       "Arrange audio clips and MIDI regions"},
-      {"pianoroll", "Workspace: Piano Roll",
-       "Draw and edit MIDI notes on the selected track"},
-      {"channelrack", "Workspace: Channel Rack",
-       "Step-sequencer channels, gates and levels"},
-      {"mixer", "Workspace: Mixer",
-       "Per-track gain, pan, mute, solo and meters"},
-      {"browser", "Workspace: Browser",
-       "Samples, project audio, instruments and effects"},
-      {"inspector", "Workspace: Inspector",
-       "Properties of the selected clip, note or channel"},
+      {"playlist", "Playlist", "Arrange audio clips and MIDI regions", "F5"},
+      {"pianoroll", "Piano Roll", "Edit MIDI notes for the selected track", "F7"},
+      {"channelrack", "Channel Rack", "Program step patterns per channel", "F6"},
+      {"mixer", "Mixer", "Gain, pan, mute, solo and meters per track", "M"},
+      {"browser", "Browser", "Samples, project audio and instruments", "F8"},
+      {"inspector", "Inspector", "Properties of the selected clip or note", "Ctrl+Shift+I"},
   };
   for (const auto& info : kStripInfo) {
     const QString id = QString::fromLatin1(info.id);
     QToolButton* b = wsButtons_.value(id);
     if (!b)
       continue;
-    hints->registerTool(b, QString::fromUtf8(info.name),
-                        QString::fromUtf8(info.desc), QString(),
-                        wsIconIds_.value(id));
+    hints->registerTool(
+        b, QString::fromUtf8(info.name), QString::fromUtf8(info.desc),
+        QString::fromUtf8(info.shortcut), wsIconIds_.value(id),
+        [b] { return b->isChecked() ? QStringLiteral("open")
+                                    : QStringLiteral("hidden"); });
   }
 
   if (navLogo_)

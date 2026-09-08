@@ -1,5 +1,6 @@
 #include <misuc/engine/project/Session.h>
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace misuc::project {
@@ -7,6 +8,27 @@ namespace misuc::project {
 using core::Json;
 
 Session::Session() = default;
+
+double Session::contentEndBeats() const {
+  double end = 0.0;
+  for (const Track& t : tracks_) {
+    for (const AudioClip& c : t.clips)
+      end = std::max(end, c.startBeats + c.durationBeats);
+    if (!t.regions.empty()) {
+      for (const MidiRegion& r : t.regions) {
+        double rEnd = r.startBeats + r.durationBeats;
+        for (const NoteEvent& n : r.notes)
+          rEnd = std::max(rEnd, r.startBeats + n.startBeats + n.durationBeats);
+        end = std::max(end, rEnd);
+      }
+    } else {
+      // Legacy whole-track notes play back directly at absolute beats.
+      for (const NoteEvent& n : t.notes)
+        end = std::max(end, n.startBeats + n.durationBeats);
+    }
+  }
+  return end;
+}
 
 std::string Session::newTrackId() {
   return "track-" + std::to_string(++trackCounter_);
@@ -57,6 +79,78 @@ std::string Session::addClip(const std::string& trackId, AudioClip clip) {
   return t->clips.back().id;
 }
 
+std::string Session::newRegionId() {
+  return "region-" + std::to_string(++regionCounter_);
+}
+
+std::string Session::addRegion(const std::string& trackId, std::string name,
+                               double startBeats, double durationBeats) {
+  Track* t = findTrack(trackId);
+  if (!t)
+    return std::string();
+  MidiRegion r;
+  r.id = newRegionId();
+  r.name = std::move(name);
+  r.startBeats = startBeats;
+  r.durationBeats = durationBeats > 0.0 ? durationBeats : 1.0;
+  t->regions.push_back(std::move(r));
+  return t->regions.back().id;
+}
+
+MidiRegion* Session::findRegion(const std::string& trackId,
+                                const std::string& regionId) {
+  Track* t = findTrack(trackId);
+  if (!t)
+    return nullptr;
+  for (MidiRegion& r : t->regions)
+    if (r.id == regionId)
+      return &r;
+  return nullptr;
+}
+
+const MidiRegion* Session::findRegion(const std::string& trackId,
+                                      const std::string& regionId) const {
+  const Track* t = findTrack(trackId);
+  if (!t)
+    return nullptr;
+  for (const MidiRegion& r : t->regions)
+    if (r.id == regionId)
+      return &r;
+  return nullptr;
+}
+
+bool Session::removeRegion(const std::string& trackId,
+                           const std::string& regionId) {
+  Track* t = findTrack(trackId);
+  if (!t)
+    return false;
+  for (auto it = t->regions.begin(); it != t->regions.end(); ++it) {
+    if (it->id == regionId) {
+      t->regions.erase(it);
+      return true;
+    }
+  }
+  return false;
+}
+
+std::string Session::duplicateRegion(const std::string& trackId,
+                                     const std::string& regionId) {
+  Track* t = findTrack(trackId);
+  if (!t)
+    return std::string();
+  for (const MidiRegion& src : t->regions) {
+    if (src.id != regionId)
+      continue;
+    MidiRegion copy = src;
+    copy.id = newRegionId();
+    copy.name += " Copy";
+    copy.startBeats += copy.durationBeats;
+    t->regions.push_back(std::move(copy));
+    return t->regions.back().id;
+  }
+  return std::string();
+}
+
 std::string Session::toJson() const {
   Json::Object root;
   root.emplace("schemaVersion", Json(Json::kSchemaVersion));
@@ -100,6 +194,28 @@ std::string Session::toJson() const {
       notes.emplace_back(Json(std::move(nobj)));
     }
     tobj.emplace("notes", Json(std::move(notes)));
+
+    Json::Array regions;
+    for (const MidiRegion& r : t.regions) {
+      Json::Object rj;
+      rj.emplace("id", Json(r.id));
+      rj.emplace("name", Json(r.name));
+      rj.emplace("startBeats", Json(r.startBeats));
+      rj.emplace("durationBeats", Json(r.durationBeats));
+      Json::Array rnotes;
+      for (const NoteEvent& n : r.notes) {
+        Json::Object nobj;
+        nobj.emplace("channel", Json(static_cast<double>(n.channel)));
+        nobj.emplace("pitch", Json(static_cast<double>(n.pitch)));
+        nobj.emplace("velocity", Json(static_cast<double>(n.velocity)));
+        nobj.emplace("startBeats", Json(n.startBeats));
+        nobj.emplace("durationBeats", Json(n.durationBeats));
+        rnotes.emplace_back(Json(std::move(nobj)));
+      }
+      rj.emplace("notes", Json(std::move(rnotes)));
+      regions.emplace_back(Json(std::move(rj)));
+    }
+    tobj.emplace("regions", Json(std::move(regions)));
 
     Json::Array clips;
     for (const AudioClip& c : t.clips) {
@@ -205,6 +321,45 @@ Session Session::fromJson(const std::string& text) {
         }
       }
 
+      if (auto v = to.find("regions"); v != to.end() && v->second.isArray()) {
+        for (const Json& rj : v->second.array()) {
+          if (!rj.isObject())
+            continue;
+          const auto& ro = rj.object();
+          MidiRegion r;
+          if (auto x = ro.find("id"); x != ro.end() && x->second.isString())
+            r.id = x->second.string();
+          else
+            r.id = s.newRegionId();
+          if (auto x = ro.find("name"); x != ro.end() && x->second.isString())
+            r.name = x->second.string();
+          if (auto x = ro.find("startBeats"); x != ro.end() && x->second.isNumber())
+            r.startBeats = x->second.number();
+          if (auto x = ro.find("durationBeats"); x != ro.end() && x->second.isNumber())
+            r.durationBeats = x->second.number();
+          if (auto x = ro.find("notes"); x != ro.end() && x->second.isArray()) {
+            for (const Json& nj : x->second.array()) {
+              if (!nj.isObject())
+                continue;
+              const auto& no = nj.object();
+              NoteEvent n;
+              if (auto y = no.find("channel"); y != no.end() && y->second.isNumber())
+                n.channel = static_cast<uint8_t>(y->second.number());
+              if (auto y = no.find("pitch"); y != no.end() && y->second.isNumber())
+                n.pitch = static_cast<uint8_t>(y->second.number());
+              if (auto y = no.find("velocity"); y != no.end() && y->second.isNumber())
+                n.velocity = static_cast<uint8_t>(y->second.number());
+              if (auto y = no.find("startBeats"); y != no.end() && y->second.isNumber())
+                n.startBeats = y->second.number();
+              if (auto y = no.find("durationBeats"); y != no.end() && y->second.isNumber())
+                n.durationBeats = y->second.number();
+              r.notes.push_back(n);
+            }
+          }
+          t.regions.push_back(std::move(r));
+        }
+      }
+
       if (auto v = to.find("clips"); v != to.end() && v->second.isArray()) {
         for (const Json& cj : v->second.array()) {
           if (!cj.isObject())
@@ -238,6 +393,34 @@ Session Session::fromJson(const std::string& text) {
           t.clips.push_back(std::move(c));
         }
       }
+
+      // Migration: legacy documents stored the whole track's notes as one
+      // flat absolute list. Fold them into a single region (local
+      // coordinates) so the rest of the app speaks one language. A track
+      // that already carries at least one region has no legacy notes.
+      if (t.regions.empty() && !t.notes.empty()) {
+        double minStart = t.notes.front().startBeats;
+        double maxEnd = t.notes.front().startBeats;
+        for (const NoteEvent& n : t.notes) {
+          minStart = std::min(minStart, n.startBeats);
+          maxEnd = std::max(maxEnd, n.startBeats + n.durationBeats);
+        }
+        if (minStart < 0.0)
+          minStart = 0.0;
+        MidiRegion mig;
+        mig.id = s.newRegionId();
+        mig.name = "MIDI 1";
+        mig.startBeats = minStart;
+        mig.durationBeats = std::max(1.0, maxEnd - minStart);
+        for (const NoteEvent& n : t.notes) {
+          NoteEvent local = n;
+          local.startBeats = n.startBeats - minStart;
+          mig.notes.push_back(local);
+        }
+        t.regions.push_back(std::move(mig));
+        t.notes.clear();
+      }
+
       s.tracks_.push_back(std::move(t));
     }
   }
@@ -261,6 +444,17 @@ Session Session::fromJson(const std::string& text) {
           const uint32_t v = static_cast<uint32_t>(std::stoul(num));
           if (v > s.clipCounter_)
             s.clipCounter_ = v;
+        } catch (const std::exception&) {
+        }
+      }
+    }
+    for (const MidiRegion& r : t.regions) {
+      if (r.id.rfind("region-", 0) == 0) {
+        const std::string num = r.id.substr(7);
+        try {
+          const uint32_t v = static_cast<uint32_t>(std::stoul(num));
+          if (v > s.regionCounter_)
+            s.regionCounter_ = v;
         } catch (const std::exception&) {
         }
       }

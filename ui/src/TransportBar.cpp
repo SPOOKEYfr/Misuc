@@ -186,7 +186,7 @@ void TransportBar::paintEvent(QPaintEvent*) {
     path.addEllipse(recordBtn_);
     p.save();
     QColor ring = recording_ ? theme::kDanger : theme::kBorderBright;
-    QColor fill = recording_ ? QColor(0x3d, 0x14, 0x14) : theme::kPanelRaised;
+    QColor fill = recording_ ? theme::kDangerSoft : theme::kPanelRaised;
     p.setBrush(fill);
     p.setPen(QPen(ring, 1.5));
     p.drawPath(path);
@@ -322,6 +322,12 @@ QString TransportBar::positionText() const {
 void TransportBar::attachHints(HintManager* hints) {
   if (!hints)
     return;
+  // Guard every capture with a QPointer: the HintManager may invoke this
+  // resolver from a queued mouse event even while the transport is being torn
+  // down — a raw `this` captured here is exactly what used to crash the app
+  // (GP fault in QWidget::mapFromGlobal on a destroyed transport). All reads
+  // below go through `self`, so a dead transport yields no hint, never a fault.
+  const QPointer<TransportBar> self(this);
   auto mk = [](const QString& name, const QString& desc, const QString& sc,
                icons::IconId ic, std::function<QString()> value = nullptr) {
     Hint h;
@@ -332,75 +338,98 @@ void TransportBar::attachHints(HintManager* hints) {
     h.value = std::move(value);
     return h;
   };
-  auto kind = [&]() -> std::optional<int> {
-    const QPoint pos = mapFromGlobal(QCursor::pos());
-    const QRectF rf = displayRect_;
+  auto kind = [self]() -> std::optional<int> {
+    if (self.isNull())
+      return std::nullopt;
+    const QPoint pos = self->mapFromGlobal(QCursor::pos());
+    const QRectF rf = self->displayRect_;
     if (rf.contains(QPointF(pos)))
       return 7;
-    QRectF ref = playBtn_;
+    QRectF ref = self->playBtn_;
     if (ref.isNull()) {
-      const double y = (height() - 40.0) / 2.0;
-      ref = QRectF(y, 0, width() - 2 * y, 40);
+      const double y = (self->height() - 40.0) / 2.0;
+      ref = QRectF(y, 0, self->width() - 2 * y, 40);
     }
     for (int i = 0; i < 7; ++i) {
-      if (buttonRect(ref, i).contains(QPointF(pos)))
+      if (self->buttonRect(ref, i).contains(QPointF(pos)))
         return i;
     }
     return std::nullopt;
   };
-  hints->registerCustom(this, [&](const QPoint& pos) -> std::optional<Hint> {
+  auto live = [self](const char* off, const char* on) {
+    return [self, off, on]() -> QString {
+      if (self.isNull())
+        return QString();
+      return QLatin1String(self->playing_ ? on : off);
+    };
+  };
+  auto liveBool = [self](const char* off, const char* on,
+                         const bool TransportBar::*member) {
+    return [self, off, on, member]() -> QString {
+      if (self.isNull())
+        return QString();
+      return QLatin1String((self->*member) ? on : off);
+    };
+  };
+  auto liveText = [self]() -> QString {
+    return self.isNull() ? QString() : self->positionText();
+  };
+  hints->registerCustom(this, [self, mk, kind, live, liveBool,
+                               liveText](const QPoint& pos) -> std::optional<Hint> {
     Q_UNUSED(pos);
+    if (self.isNull())
+      return std::nullopt;
     const std::optional<int> idx = kind();
     if (!idx)
       return std::nullopt;
     switch (*idx) {
       case 0:
-        return mk(QStringLiteral("Transport: Play"),
-                  QLatin1String(playing_ ? "Pause playback" : "Start playback from the playhead"),
+        return mk(QStringLiteral("Play"),
+                  QLatin1String(self->playing_ ? "Pause playback"
+                                               : "Start playback from the playhead"),
                   QStringLiteral("Space"), icons::IconId::Play,
-                  [&] { return QLatin1String(playing_ ? "playing" : "stopped"); });
+                  live("stopped", "playing"));
       case 1:
-        return mk(QStringLiteral("Transport: Stop"),
+        return mk(QStringLiteral("Stop"),
                   QStringLiteral("Return the playhead to the song start"),
                   QStringLiteral("S"), icons::IconId::Stop);
       case 2:
-        return mk(QStringLiteral("Count-In"),
+        return mk(QStringLiteral("Metronome"),
                   QStringLiteral("Play a full bar of click before recording"),
                   QString(), icons::IconId::Metronome,
-                  [&] { return countIn_ ? QStringLiteral("on") : QStringLiteral("off"); });
+                  liveBool("off", "on", &TransportBar::countIn_));
       case 3:
         return mk(QStringLiteral("Loop"),
-                  QStringLiteral("Toggle looped playback of the section"),
+                  QStringLiteral("Loop playback over the active section"),
                   QString(), icons::IconId::Loop,
-                  [&] { return loopOn_ ? QStringLiteral("on") : QStringLiteral("off"); });
+                  liveBool("off", "on", &TransportBar::loopOn_));
       case 4:
         return mk(QStringLiteral("Record"),
                   QStringLiteral("Arm/disarm input recording at the playhead"),
                   QString(), icons::IconId::Record,
-                  [&] { return recording_ ? QStringLiteral("armed") : QStringLiteral("off"); });
+                  liveBool("off", "armed", &TransportBar::recording_));
       case 5:
         return mk(QStringLiteral("Snap"),
                   QStringLiteral("Quantize edits to the grid"),
                   QStringLiteral("N"), icons::IconId::Snap,
-                  [&] { return snap_ ? QStringLiteral("on") : QStringLiteral("off"); });
+                  liveBool("off", "on", &TransportBar::snap_));
       case 6:
-        return mk(QStringLiteral("Playback Mode"),
-                  QStringLiteral("Switch between Song and Pattern arrangement"),
+        return mk(QStringLiteral("PAT/SONG"),
+                  QStringLiteral("Switch between Pattern and Song arrangement"),
                   QString(), icons::IconId::SongMode,
-                  [&] { return songMode_ ? QStringLiteral("song") : QStringLiteral("pattern"); });
+                  liveBool("PAT", "SONG", &TransportBar::songMode_));
       case 7:
-        return mk(QStringLiteral("Transport Position"),
+        return mk(QStringLiteral("Position"),
                   QStringLiteral("Current musical position (bar.beat.16th.tick)"),
-                  QString(), icons::IconId::None,
-                  [&] { return positionText(); });
+                  QString(), icons::IconId::None, liveText);
       default:
         return std::nullopt;
     }
   });
   hints->setDefaultHint(
       mk(QStringLiteral("Transport"),
-         QStringLiteral("Position readout, tempo and the transport controls"),
-         QString(), icons::IconId::None, [&] { return positionText(); }));
+         QStringLiteral("Position, tempo and the transport controls"),
+         QString(), icons::IconId::None, liveText));
 }
 
 } // namespace misuc::ui

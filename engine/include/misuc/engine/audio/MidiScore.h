@@ -14,21 +14,43 @@ namespace misuc::engine {
 // velocity as amplitude. Per-track gain, pan, mute and solo are applied by the
 // audio mixer at render time (so they can change without re-scanning notes).
 // Notes are sorted by start beat. Call from any non-RT thread.
+//
+// MIDI regions are the primary note container: each region contributes its
+// notes at absolute beats (region.startBeats + local offset). A track with no
+// regions falls back to its legacy whole-track `notes` list, so documents
+// written before regions were introduced still play.
 inline void buildMidiScore(const misuc::project::Session& session,
                            std::vector<dsp::MidiNote>& out) {
   out.clear();
   size_t trackIndex = 0;
   for (const misuc::project::Track& t : session.tracks()) {
-    for (const misuc::project::NoteEvent& n : t.notes) {
-      if (n.durationBeats <= 0.0)
-        continue;
-      dsp::MidiNote mn;
-      mn.startBeats = n.startBeats;
-      mn.durationBeats = n.durationBeats;
-      mn.freq = dsp::midiNoteToFreq(n.pitch);
-      mn.gain = static_cast<float>(n.velocity) / 127.f;
-      mn.track = static_cast<uint32_t>(trackIndex);
-      out.push_back(mn);
+    const bool hasRegions = !t.regions.empty();
+    if (hasRegions) {
+      for (const misuc::project::MidiRegion& r : t.regions) {
+        for (const misuc::project::NoteEvent& n : r.notes) {
+          if (n.durationBeats <= 0.0)
+            continue;
+          dsp::MidiNote mn;
+          mn.startBeats = r.startBeats + n.startBeats;
+          mn.durationBeats = n.durationBeats;
+          mn.freq = dsp::midiNoteToFreq(n.pitch);
+          mn.gain = static_cast<float>(n.velocity) / 127.f;
+          mn.track = static_cast<uint32_t>(trackIndex);
+          out.push_back(mn);
+        }
+      }
+    } else {
+      for (const misuc::project::NoteEvent& n : t.notes) {
+        if (n.durationBeats <= 0.0)
+          continue;
+        dsp::MidiNote mn;
+        mn.startBeats = n.startBeats;
+        mn.durationBeats = n.durationBeats;
+        mn.freq = dsp::midiNoteToFreq(n.pitch);
+        mn.gain = static_cast<float>(n.velocity) / 127.f;
+        mn.track = static_cast<uint32_t>(trackIndex);
+        out.push_back(mn);
+      }
     }
     ++trackIndex;
   }

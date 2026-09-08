@@ -16,6 +16,12 @@ public:
                  bool clipped);
   void clear() { setLevels(0.f, 0.f, 0.f, 0.f, false); }
 
+  float peakL() const { return peakL_; }
+  float rmsL() const { return rmsL_; }
+  float peakR() const { return peakR_; }
+  float rmsR() const { return rmsR_; }
+  bool clipped() const { return clipped_; }
+
   QSize sizeHint() const override { return QSize(26, 220); }
   QSize minimumSizeHint() const override { return QSize(24, 80); }
 

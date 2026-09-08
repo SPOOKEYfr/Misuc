@@ -42,7 +42,9 @@ public:
 signals:
   void insertSample(const QString& path);
   void hint(const QString& text);
-  void previewRequested();
+  // Real audio audition: the selected sample file should be played through the
+  // engine's one-shot sample preview pipeline (not a synthesized beep).
+  void previewFile(const QString& path);
 
 protected:
   void populateSamples();
@@ -52,6 +54,7 @@ private:
   void onFileActivated();
   void selectFileItem(QTreeWidgetItem*);
   void buildPreview(const QString& path);
+  void selectScanFolder();
 
   QTreeWidget* cats_ = nullptr;
   QTreeWidget* files_ = nullptr;
@@ -60,8 +63,10 @@ private:
   QLabel* previewMeta_ = nullptr;
   QToolButton* previewBtn_ = nullptr;
   QToolButton* insertBtn_ = nullptr;
+  QToolButton* scanBtn_ = nullptr;
   QLineEdit* searchBox_ = nullptr;
   QStringList sessionSources_;
+  QStringList extraScanDirs_; // user-chosen sample-pack folders
 };
 
 } // namespace misuc::ui

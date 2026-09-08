@@ -2,12 +2,14 @@
 
 #include <QApplication>
 #include <QIcon>
+#include <QSettings>
 
 #include <misuc/engine/audio/AudioEngine.h>
 #include <misuc/engine/audio/PipeWireBackend.h>
 
 #include "MainWindow.h"
 #include "branding/Logo.h"
+#include "project/DemoProject.h"
 #include "theme/ThemeEngine.h"
 
 using misuc::engine::AudioEngine;
@@ -32,6 +34,20 @@ int main(int argc, char** argv) {
 
   auto engine = std::make_unique<AudioEngine>(std::make_unique<PipeWireBackend>());
   misuc::ui::MainWindow win(*engine);
+
+  // First run: boot straight into the bundled demo so the user immediately sees
+  // real arrangement structure (lanes, clips, notes) and hears audio. The demo
+  // is a genuine project file on disk; File > New Demo Project… reopens it.
+  QSettings settings;
+  if (!settings.value(QStringLiteral("demoCreated")).toBool()) {
+    misuc::ui::DemoPaths paths;
+    QString perr;
+    if (misuc::ui::ensureDemoProject(paths, perr)) {
+      win.openProject(paths.project);
+      settings.setValue(QStringLiteral("demoCreated"), true);
+    }
+  }
+
   win.show();
   const int rc = app.exec();
   engine->closeAudio();

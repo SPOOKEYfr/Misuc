@@ -4,14 +4,14 @@
 #include <QLabel>
 #include <QObject>
 #include <QPoint>
+#include <QPointer>
 #include <QString>
 #include <functional>
 #include <optional>
-#include <unordered_map>
+#include <vector>
 
 #include "branding/Icons.h"
 
-class QTimer;
 class QWidget;
 
 namespace misuc::ui {
@@ -22,10 +22,10 @@ namespace misuc::ui {
 // every show/refresh, so hint text, shortcut, icon and live state are always
 // the single source of truth (spec §78).
 struct Hint {
-  QString name;        // e.g. "Transport: Play"
-  QString description; // e.g. "Start playback from the playhead"
+  QString name;        // short, unambiguous: "Play", "Record", "Channel Rack"
+  QString description; // one-line purpose: "Start playback from the playhead"
   QString shortcut;    // e.g. "Space"
-  QIcon icon;          // optional lead glyph
+  QIcon icon;          // lead glyph, always present for chrome controls
   QString commandId;   // registry-backed widget (optional)
   std::function<QString()> value; // live value provider, may be null
 };
@@ -33,8 +33,11 @@ struct Hint {
 // Builds a Hint for the given registry command id (empty on unknown ids).
 Hint hintFromCommand(const QString& commandId);
 
-// Renders the hint line: [icon] [name — description]   [value]   [shortcut].
-class HintBar : public QLabel {
+// Compact contextual info panel: [icon] [name — one-line purpose]
+//                                         [live value] [shortcut chip].
+// A real layout of child labels (never hand-painted text) so nothing overlaps
+// and the bar keeps readable at 100-125% scaling and small windows.
+class HintBar : public QWidget {
   Q_OBJECT
 public:
   explicit HintBar(QWidget* parent = nullptr);
@@ -47,15 +50,26 @@ public:
   bool hasHint() const { return !hint_.name.isEmpty(); }
 
 protected:
-  void paintEvent(QPaintEvent* event) override;
+  void resizeEvent(QResizeEvent* event) override;
 
 private:
+  void elideLabels();
+
   Hint hint_;
+  QLabel* glyph_ = nullptr;
+  QLabel* name_ = nullptr;
+  QLabel* desc_ = nullptr;
+  QLabel* value_ = nullptr;
+  QLabel* chip_ = nullptr;
 };
 
 // Registry + event filter: hovering a registered widget surfaces its hint in
 // the shared HintBar; leaving restores the default. refresh() re-evaluates all
 // value providers and registry state (called from the UI poll timer).
+//
+// Lifecycle: registration is keyed by QPointer so a widget that is destroyed
+// mid-session (theme re-applies, dock re-shuffle, teardown) is atomically
+// dropped and can never have a resolver invoked on a dangling `this`.
 class HintManager : public QObject {
   Q_OBJECT
 public:
@@ -78,7 +92,9 @@ public:
                     icons::IconId icon = icons::IconId::None,
                     std::function<QString()> value = nullptr);
   // Registers a custom-painted control (no child widgets): the resolver maps a
-  // local hit position to the hint shown under that hotspot.
+  // local hit position to the hint shown under that hotspot. The resolver is
+  // only ever invoked while the widget is alive (QPointer-guarded) and must
+  // treat its own state as possibly-stale.
   void registerCustom(QWidget* widget,
                       std::function<std::optional<Hint>(const QPoint&)> resolve);
 
@@ -89,18 +105,23 @@ protected:
   bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
+  struct Entry {
+    QPointer<QWidget> widget;
+    Hint hint;
+    QString commandId;
+    std::function<std::optional<Hint>(const QPoint&)> resolve;
+  };
+  int findEntry(const QWidget* widget) const;
+  void purgeEntry(int index);
   Hint hintFor(const QWidget* widget, const QPoint& pos) const;
   void showFor(QWidget* widget);
   void settleHover();
 
   HintBar* bar_;
   Hint defaultHint_;
-  std::unordered_map<QWidget*, Hint> hints_;
-  std::unordered_map<QWidget*, QString> commandIds_;
-  std::unordered_map<QWidget*, std::function<std::optional<Hint>(const QPoint&)>>
-      customResolvers_;
-  QWidget* hovered_ = nullptr;
-  QWidget* focused_ = nullptr;
+  std::vector<Entry> entries_;
+  QPointer<QWidget> hovered_;
+  QPointer<QWidget> focused_;
   QTimer* delay_ = nullptr;
   QPoint lastPos_;
 };

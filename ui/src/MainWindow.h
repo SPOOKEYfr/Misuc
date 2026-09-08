@@ -50,6 +50,8 @@ public:
   void sessionEdited() { onSessionEdited(); }
   // Test hook: skip the save dialog and render straight to this path.
   void setExportPathOverride(const QString& path) { exportPathOverride_ = path; }
+  // Test hook: arm/disarm channel-rack pattern playback without the UI toggle.
+  void setRackPatternLiveForTest(bool live) { onRackPatternLive(live); }
   // Test hooks: direct save/load with an explicit path (used by the harness
   // to verify the portable asset-path round-trip and app restore).
   bool writeProject(const QString& path);
@@ -73,12 +75,15 @@ private:
   void syncWorkspaceStrip();
   // Help -> About Misuc…
   void showAbout();
+  // Help -> User Guide… (shipped tutorial text)
+  void showUserGuide();
   void applyLayoutPreset(const QString& name);
   void persistLayout();
   void restoreLayout();
 
   void newProject();
   void openDialog();
+  void openDemoProject();
   bool saveProject();
   bool saveProjectAs();
   void exportAudio();
@@ -87,8 +92,13 @@ private:
   void togglePlayStop();
   void applyTempoToEngine();
   void applyLoopToEngine(misuc::project::Session& s);
+  void applyContentEndToEngine(); // publishes session_.contentEndBeats()
   void rebuildMidiScore();
   void rebuildClipScore();
+  // Channel-rack pattern playback: publishes the armed pattern bank as a
+  // looping 4-beat engine score so steps audition the real audio pipeline.
+  void onRackPatternLive(bool live);
+  void rebuildRackScore();
   void onRecordToggled(bool on);
   // Relocate an imported or recorded audio file into the project's audio/
   // directory when the project has a home; otherwise keep the source path.
@@ -103,6 +113,8 @@ private:
   misuc::core::UndoStack<misuc::project::Session> undo_;
   QString projectPath_;
   bool dirty_ = false;
+  // True while the channel-rack stepper owns the engine playback score.
+  bool rackPatternLive_ = false;
 
   HeaderBar* headerBar_ = nullptr;
   TransportBar* transport_ = nullptr;

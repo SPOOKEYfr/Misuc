@@ -425,6 +425,55 @@ the end of this section. Changes, each in its own commit:
      /tmp/mc_b/shots2/r{resolution}.png for 1280x720..3840x2160 plus
      studio1366x768.png / studio1920x1080.png (all docks revealed).
 
+Phase 14.4 ADDENDUM — engine-integrated pattern playback + demo project
+(2026-09-08). Everything in 14.3 still holds; the additions:
+  1. Channel Rack Pattern Live: the "Pattern Play" chrome toggle arms live
+     sequencing — MainWindow publishes the active 16-step pattern as a real
+     MidiNote score (startBeats per step, 0.25 per sixteenth, swing delays odd
+     16ths), loops the engine transport over 0..4 beats, and honours mute/solo/
+     volume per channel. When the toggle is OFF the score and session loop are
+     restored instantly. No engine code was changed; the existing setScore()
+     + setLoop() public API drives everything.
+  2. Programmatic step editing (new ChannelRack public slots): setStep,
+     setMuted, setSolo, setVolume — each republishes when Pattern Live is
+     armed; used by the QA harness and available for future automation.
+  3. Demo project (first run): on a fresh launch the app generates a real
+     Misuc project under QStandardPaths::AppDataLocation/MisucDemo
+     containing:
+       - 160 honest MIDI notes (drums/bass/keys, 8 bars at 120 BPM)
+       - one generated stereo pad clip (demo_pad.wav, 8 s PCM-16) with a
+         2-beat fade-in / 4-beat fade-out
+       - 4 named tracks (1-Drums, 2-Keys, 3-Bass, 4-Pad)
+     A "New Demo Project…" entry under File regenerates + loads it on demand.
+  4. Real-audio proof (offline render): qatool rackaudio renders a starter-kit
+     kick-only pattern to WAV and asserts:
+       - silence-control (bank cleared → peak ≈ 0)
+       - exactly 4 kick hits spaced ≈ 0.5 s
+       - swing proof: a single off-beat 16th shifts by ≈ 0.085 s at 66% swing
+     qatool demoaudio renders the full 32-beat demo arrangement + pad clip and
+     asserts audible peaks (bar-1 peak ≈ 0.84, full ≈ 1.11).
+  5. Evidence footprint:
+       - qatool behave 26/26 (adds: demo-load/4-tracks/notes/clips/title,
+         tab presence + count + distinctness, tab-switch, playlist-present,
+         transport-present, metronome-off, round-trip write/reload + pad path)
+       - qatool rackaudio 6/6, demoaudio 5/5
+       - layout auditor 24/24 at 0 issues (6 resolutions × 4 scale factors)
+         using window-mapped global-rect containment (ignores toolbar/scroll
+         internals as before).
+       - pixel profiling on r1920x1080 + studio: chrome avg ~(19–22, 24–27,
+         33–36), only violet-family saturated hues (210/225/240), no
+         red/green/yellow — palette restraint unchanged.
+       - engine suite 54145 checks / 1 device-gated live-audio failure
+         (PipeWire opened with 0-frame buffers in the offscreen sandbox;
+         engine untouched, verified via git diff).
+       - real misuc_app binary boots offscreen, writes the demo files, stays
+         alive (rc=124 timeout), confirming the main() bootstrap path works.
+
+AUDIO NOTE: the one engine-suite failure (`test_audio.cpp:160 audible`) is a
+sandbox environment issue, not a code regression — the PipeWire backend opens
+but delivers 0-frame buffers due to the sandboxed real-time scheduling policy;
+engine/tests/ have zero diffs from the prior known-green commit.
+
 HUMAN-DESKTOP VERIFICATION REQUIRED (the agent runs offscreen and cannot see
 images — every item below is unverified by pixel probe alone):
   * Perceived depth/matte glass feel of the chrome under a real compositor.
@@ -433,8 +482,12 @@ images — every item below is unverified by pixel probe alone):
   * Icon-only chrome legibility (glyph recognition at 100-125% scaling).
   * Mixer strip color coding readability (muted slate vs violet master).
   * Channel Rack pattern/swing interaction comfort at typical mouse speeds.
-  * Live PipeWire audio device open + monitoring (never auto-testable).
+  * Live PipeWire audio: hear the pattern playback and demo arrangement
+    through a real device (offline-render proof exists; live playback depends
+    on device + rtkit — never auto-testable).
   * Taskbar icon/WM_CLASS behavior and .deb icons under a real DE.
+  * First-run demo: confirm it loads at first launch, is audible, and the
+    Playlist/Piano Roll tabs visibly show structure (lanes, clips, notes).
 
 17. COMPLETENESS PERCENTAGES (estimated, honest)
 -------------------------------------------------------------------------------
@@ -569,3 +622,137 @@ Key files:     AudioEngine.{h,cpp} (there is no bus struct; MixerTrackRT is
 ===
 END OF AUDIT UPDATE + PHASE 1 — read-only audit + Phase 1 UI redesign.
 ===
+
+22. PHASE 1.5 ADDENDUM — IDENTIFIED-ON-DESKTOP UI DEFECTS PASS  (2026-09-08)
+-------------------------------------------------------------------------------
+   Real-desktop launch (lightdm/X11 session) uncovered four live defects; all
+   four fixed + machine-verified. Engine untouched this pass.
+   - [CRASH] App GP-faulted (SIGSEGV, Qt6Widgets offset 0x1cd358,
+     QWidget::mapFromGlobal) on MouseMove over the transport: HintManager fed a
+     resolver holding a raw TransportBar* during teardown. Fixed by QPointer
+     registry (entries purged on QObject::destroyed), null-guarded eventFilter,
+     and QPointer-captured lambdas in TransportBar::attachHints.
+   - [TRANSPARENT MENUS] last QSS rule "QWidget { background: transparent; }"
+     (equal specificity, last-wins) stripped backgrounds off QMenu/QMenuBar/
+     QToolBar/QStatusBar/QTabBar. Removed; QMenu now opaque panel + violet
+     hover. Ranked: File/Edit/Add/View menus all near-black opaque (@ 83.9%
+     dark region sample) with light-text rows.
+   - [NOT-BLACK THEME] Palette was blue-tinted. New default preset "Misuc
+     Black" (foundation #0a0a0c, panels #101013/#17171b/#050506, borders
+     #232328/#2c2c33, text #ececef/#8b8b94/#56565e, accent #8f7bfa). Legacy
+     "Misuc Graphite" automatically migrated in loadPersisted. Desktop pixel
+     profile: 97.8% dark, chrome avg RGB(17,16,20) colourless, hue 240-330
+     violet-only accents. Hard-coded literals repointed to tokens: mixer strip
+     ladder (violet/slate), ChannelStrip default, VerticalMeter kMeterHot,
+     transport record fill.
+   - [HINTBAR] Unknown-text overlap/clipping replaced by a real layout of five
+     cells [glyph | name | purpose | value | shortcut] with elision; resolves
+     semantics like "Play / Start playback / Stopped / Space".
+   - [TITLE] MainWindow ctor now calls updateWindowTitle(): no phantom dirty
+     star on a fresh launch ("Untitled - Misuc").
+   Verification (this round, after the above edits):
+      qatool hintprobe 8/8    (cells=5, inside, no-overlap, resolver 8/8 via
+        driven cursor incl. mapFromGlobal path at 1.0/1.25/1.5 scale, teardown
+        DURING hover stress -> no crash).
+      qatool behave 26/26, rackaudio 6/6, demoaudio 5/5,
+      audit 0 issues at 1280x720 / 1920x1080 / 3840x2160.
+      Desktop (real session): hover-stormed transport (the exact former crash
+        gesture) -> process alive; File>New Demo Project -> title "Misuc Demo
+        - Misuc", 4 tracks/160 notes; F5/F7/F6/F8 switching -> alive; every
+        global menu opaque-black readable; clean exit (no crash on close).
+      Live-device audio NOT verifiable in this sandbox (no /dev/snd fd can be
+        opened, pipewire socket absent) -> channel-rack -> engine -> WAV path
+        machine-verified offline instead (rackaudio/demoaudio). Environment
+        gate, not a code defect.
+   Human visual check on a normal desktop still requested (icons-perceived
+   clarity, hint-bar aesthetics, general black look).
+===
+END OF PHASE 1.5 — desktop-defect pass.
+
+23. PHASE 2 ADDENDUM — REAL ARRANGEMENT WS (regions, seek, patterns, browser)
+------------------------------------------------------------------------------
+(2026-09-08) Completed the second big milestone: the arrangement/music-editor
+workstations are now backed by a real region model and real engine actions,
+closing the "model/UI-only" gaps flagged in §14.3/§4. Highlights, each
+machine-verified below:
+
+  1. SESSION REGION MODEL + MIGRATION (engine/model)
+     - MidiRegion { id, name, startBeats, durationBeats, notes[] } added to
+       Track; notes are LOCAL offsets. buildMidiScore flattens to the global
+       timeline (region.startBeats + note.startBeats) when a track has >= 1
+       region; tracks with legacy absolute notes still work.
+     - JSON v2 serialization adds "regions"; the v2 reader folds legacy
+       track.notes into one region and clears them. EVERY loaded project is
+       region-based; the in-memory demo is only realised through openProject,
+       so it always arrives migrated.
+     - addRegion / findRegion / removeRegion / duplicateRegion on Session.
+  2. ENGINE: SEEK + ONE-SHOT SAMPLE PREVIEW
+     - New ControlStream kinds Seek (seekToBeat, parks the playhead) and
+       PreviewSample (previewSample triple-buffers a full decoded sample, RT
+       rendered, ~30 s cap). beginPlay no longer rewinds to 0: Stop rewinds,
+       ruler seeks park the caret, Play resumes from the caret.
+     - Tests preview_sample_headless + seek_transport_headless (test_clips.cpp)
+       are green — suite is now 54199 checks, 0 failures.
+  3. PIANO ROLL — full range + region-bound (PianoRoll.{h,cpp})
+     - Full MIDI range 0..127 (128 rows, velocity lane 56px).
+     - Bound to a Session region: notesRef() routes all 30 edit sites through
+       the region's note list; clip lane is hidden while a region is bound so
+       the grid is uniformly local; region name painted on the ruler.
+     - setTrack binds the first region; setRegion validates; ensureRegion()
+       auto-creates "MIDI 1" (4 beats at 0) on the first drawn note.
+     - Real ruler seek (click -> global-beat transport seek), velocity-lane
+       drag editing, piano-key hover audition (audition(midiNoteToFreq)).
+       horizonBeats follows the region length; auto-follow is region-local.
+  4. PLAYLIST — region-based arrangement editor rewrite (Playlist.{h,cpp})
+     - Items now ARE regions/clips: move / resize / trim / slice, marquee
+       multi-select, copy/paste/duplicate/delete, context menus (Rename,
+       Duplicate, Split at Playhead, Slice Here, Mute/Unmute, Open in Piano
+       Roll, Delete), ruler seek, Ctrl+wheel zoom, slice tool, drag-to-drop
+       audio (addClip). openInPianoRoll carries (trackId, regionId).
+  5. CHANNEL RACK -> REAL REGION  (Place Pattern)
+     - New "Place Pattern" chrome button: materialises the active bank's gated
+       steps into a real 4-beat Session region "Pattern N" on the "Sequencer"
+       track (one 1/16 note per gate at the channel's pitch, 0.24 beats each),
+       positioned after the last region/clip, then switches to the Playlist.
+  6. BROWSER — real sample audition + sample-pack scanning
+     - Preview button now plays the ACTUAL sample file through previewSample
+       (was a synthesized beep). "Scan Sample Pack Folder…" adds arbitrary
+       folders to the recursive scan (Music/Samples/Sounds + project audio).
+       Drag-to-Playlist insert was already real.
+  7. P1: AUDIO BACKEND AUTO-START
+     - AudioSettingsPage::autoStart() opens the engine at launch (48 kHz / 256
+       frames / first enumerated output, inputChannels 0 to maximise success).
+       Failure is silent and surfaceable in Tools > Audio Console. transport.record
+       command now armed through the real record engine+clip-staging path.
+  8. MENUS / COMMANDS / TUTORIAL
+     - Help > "User Guide…" opens a shipped tutorial (:/help/user-guide.txt,
+       resources.qrc) covering the real workflows above.
+  9. KEYBOARD AUDITION FIX
+     - PianoKeys->PianoRoll audition connect ran before keys_ existed (null
+       receiver) — silently dropped. Connection moved after construction; the
+       desktop warning is gone.
+
+  Evidence (this round):
+     - ./build/bin/misuc_tests        -> 54199 checks, 0 failures, PASS.
+     - qatool behave                   -> failures=0 (incl. roundtrip-notes via
+                                         regions = 160, pad clip = 1).
+     - qatool placepattern (NEW)       -> 9/9: real QToolButton mouse-click path
+       (press+release on the found Place Pattern button) materialises a
+       "Sequencer" track + "Pattern 1" region (0..4 beats, 4 gated notes,
+       correct pitch/step/duration), second placement stacks at start 4.0.
+     - qatool demoaudio                -> failures=0 (bar-1 peak 0.84, full
+       arrangement 1.11) — the demo now renders through the region model.
+     - Real desktop (X11, QT_QPA_PLATFORM=xcb): app boots, Audio engine
+       auto-started on 'PipeWire' at 48000 Hz (logged), window mapped; F6/F5/F7
+       switches, Space play, R record arm/disarm, Space stop all alive; window
+       pixel profile 95.8% dark with violet-only accents; clean shutdown.
+       The prior "invalid nullptr parameter" PianoKeys connect warning is gone
+       from the launch log.
+     - (Fixed during pass) Track/t in place-pattern lambda needed qualification;
+       <cmath> include added to MainWindow.cpp.
+
+  Still environment-gated (unchanged): live loudspeaker output (/dev/snd, real
+  PipeWire device) — offline render + NullBackend pipelines are the
+  machine-verifiable substitutes; see the HUMAN-DESKTOP list after §14.4.
+===
+END OF PHASE 2 — real arrangement workspace (regions/seek/patterns/browser).

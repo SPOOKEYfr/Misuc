@@ -1,6 +1,8 @@
 #include "Browser.h"
 
 #include <QDir>
+#include <QDirIterator>
+#include <QFileDialog>
 #include <QFileInfo>
 #include <QFileSystemWatcher>
 #include <QHBoxLayout>
@@ -132,8 +134,17 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
   insertBtn_->setFixedSize(28, 28);
   insertBtn_->setCursor(Qt::PointingHandCursor);
   insertBtn_->setFocusPolicy(Qt::NoFocus);
+  scanBtn_ = new QToolButton(preview);
+  scanBtn_->setIcon(icons::make(icons::IconId::Folder, theme::kTextDim, 16));
+  scanBtn_->setIconSize(QSize(16, 16));
+  scanBtn_->setAutoRaise(true);
+  scanBtn_->setFixedSize(28, 28);
+  scanBtn_->setCursor(Qt::PointingHandCursor);
+  scanBtn_->setFocusPolicy(Qt::NoFocus);
+  scanBtn_->setToolTip(QStringLiteral("Scan Sample Pack Folder..."));
   btnRow->addWidget(previewBtn_);
   btnRow->addWidget(insertBtn_);
+  btnRow->addWidget(scanBtn_);
   btnRow->addStretch(1);
   previewHost_->addLayout(btnRow);
   rcLay->addWidget(preview);
@@ -178,7 +189,7 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
       QString p = files_->currentItem()->data(0, Qt::UserRole).toString();
       if (!p.isEmpty()) {
         buildPreview(p);
-        Q_EMIT previewRequested();
+        Q_EMIT previewFile(p);
       }
     }
   });
@@ -189,6 +200,9 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
               if (!p.isEmpty()) emit insertSample(p);
             }
           });
+  connect(scanBtn_, &QToolButton::clicked, this, [this] {
+    selectScanFolder();
+  });
   onCategoryActivated();
 }
 
@@ -247,6 +261,7 @@ void Browser::onCategoryActivated() {
   baseDirs << home.absoluteFilePath("Music")
            << home.absoluteFilePath("Samples")
            << home.absoluteFilePath("Sounds");
+  baseDirs += extraScanDirs_;
 
   QStringList names;
   if (baseDirs.isEmpty()) baseDirs << QDir::homePath();
@@ -305,6 +320,17 @@ void Browser::buildPreview(const QString& path) {
       .arg(qint64(audio.sampleRate))
       .arg(audio.durationSeconds(), 0, 'f', 2);
   previewMeta_->setText(meta);
+}
+
+void Browser::selectScanFolder() {
+  const QString dir = QFileDialog::getExistingDirectory(
+      this, QStringLiteral("Scan Sample Pack Folder"),
+      QStandardPaths::writableLocation(QStandardPaths::HomeLocation));
+  if (dir.isEmpty())
+    return;
+  if (!extraScanDirs_.contains(dir))
+    extraScanDirs_ << dir;
+  onCategoryActivated();
 }
 
 void Browser::setSessionSources(const QStringList& sourceFiles) {

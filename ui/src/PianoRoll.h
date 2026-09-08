@@ -13,7 +13,8 @@ class QMouseEvent;
 namespace misuc::ui {
 
 // Ruler above the piano-roll canvas; scrolls horizontally with it. Also shows
-// the loop region and lets you draw it by dragging.
+// the loop region, the currently edited region's name, and lets you draw a
+// loop by dragging. A plain click seeks the transport caret (onSeekClicked).
 class PianoRuler : public QWidget {
   Q_OBJECT
 public:
@@ -21,8 +22,11 @@ public:
   void setHorizon(double numBeats, int pxPerBeat, int barBeats, int hbar);
   void setPlayheadBeat(double beats, bool visible);
   void setLoop(bool on, double startBeats, double endBeats);
+  void setRegionName(const QString& name);
   // Callback for a completed loop-region drag (normalized start/end beats).
   std::function<void(double, double)> onLoopDrawn;
+  // Callback for a plain left-click seek (beat in ruler space).
+  std::function<void(double)> onSeekClicked;
 
 protected:
   void paintEvent(QPaintEvent* event) override;
@@ -43,11 +47,14 @@ private:
   double loopStartBeats_ = 0.0;
   double loopEndBeats_ = 4.0;
   bool grabbingLoop_ = false;
+  bool moved_ = false;
   double grabStartBeat_ = 0.0;
   double grabEndBeat_ = 0.0;
+  QString regionName_;
 };
 
-// Piano-key column left of the canvas; scrolls vertically with it.
+// Piano-key column left of the canvas; scrolls vertically with it. Clicking or
+// dragging a key auditions that pitch through the piano-roll owner.
 class PianoKeys : public QWidget {
   Q_OBJECT
 public:
@@ -55,11 +62,18 @@ public:
   void setRange(int lowPitch, int rowH, int vbar);
   QSize sizeHint() const override;
 
+signals:
+  void keyPressed(int pitch);
+
 protected:
   void paintEvent(QPaintEvent* event) override;
+  void mousePressEvent(QMouseEvent* event) override;
+  void mouseMoveEvent(QMouseEvent* event) override;
 
 private:
-  int lowPitch_ = 24;
+  int pitchAtY(int y) const;
+
+  int lowPitch_ = 0;
   int rowH_ = 18;
   int vbar_ = 0;
 };
@@ -90,7 +104,10 @@ public:
   explicit PianoRoll(misuc::project::Session& session, QWidget* parent = nullptr);
 
   void setTrack(const QString& id);
+  void setRegion(const QString& trackId, const QString& regionId);
   QString trackId() const { return trackId_; }
+  QString regionId() const { return regionId_; }
+  QString regionName() const;
   void refresh(); // repaint from the session
   void setPlayhead(bool playing, double beats);
   void autoFollow(bool playing, double beats);
@@ -104,20 +121,27 @@ public:
   // Mirror the session's persisted loop region into the ruler.
   void setLoop(bool on, double startBeats, double endBeats);
 
+  // Ruler geometry / editing scope.
+  double horizonBeats() const { return horizonBeats_; }
+  void ensureRegion(); // selects (or creates) a real region for current track
+
   // Ruler/keyboard/canvas geometry shared with the drawing code.
   static constexpr int kKeyWidth = 60;
   static constexpr int kRulerH = 26;
   static constexpr int kClipLaneH = 28; // audio-clip lane above the note grid
   static constexpr int kRowH = 18;
-  static constexpr int kLowPitch = 24; // C1
-  static constexpr int kRowCount = 61; // pitches 24..84 (C1..C6)
+  static constexpr int kLowPitch = 0;       // full MIDI range (0..127)
+  static constexpr int kRowCount = 128;
   static constexpr double kHorizonBeats = 64.0;
+  static constexpr int kVelLaneH = 56;      // velocity lane below the notes
 
 signals:
   void edited();
   // Audition feedback: freq in Hz, velocity 0..1. Emitted as notes are added,
   // dragged, or clicked so the UI can preview them even while stopped.
   void audition(double freq, float velocity);
+  // Transport seek requested by clicking the ruler (global beats).
+  void seekRequested(double beat);
 
 protected:
   void paintEvent(QPaintEvent* e) override;
@@ -131,8 +155,16 @@ private:
 
   void commit() noexcept { emit edited(); }
 
+  // Region-frame helpers: local coordinates are region-relative (0 at the
+  // region's own start); global coordinates are transport/timeline positions.
+  double regionStart() const;
+  double localBeat(double globalBeat) const;
+  double toGlobalBeat(double localBeat) const;
+
   misuc::project::Session& session_;
   QString trackId_;
+  QString regionId_;
+  double horizonBeats_ = kHorizonBeats;
   Canvas* canvas_ = nullptr;
   PianoRuler* ruler_ = nullptr;
   PianoKeys* keys_ = nullptr;

@@ -1,0 +1,84 @@
+MISUC USER GUIDE
+================
+
+Misuc is a Linux DAW. This guide walks through the real, working features in
+order, so you can go from empty project to a finished arrangement.
+
+1. STARTUP / DEMO
+-----------------
+The first launch opens the bundled demo project (File > New Demo Project…
+reopens it at any time). The audio backend starts automatically at launch
+(48 kHz, 256 frames on your first output device). If no device is available the
+engine stays off and the status bar says so — check Tools > Audio Console,
+press "Open Device".
+
+2. THE FOUR WORKSPACES
+----------------------
+  Playlist (F5)     - the arrangement editor: audio clips + MIDI regions.
+  Channel Rack (F6) - the step sequencer / pattern editor.
+  Piano Roll (F7)   - the MIDI editor bound to the selected track's region.
+  Browser (F8)      - samples, project audio, instruments, effects, plugins.
+  Mixer (F9)        - per-track gain, pan, mute, solo and live meters.
+
+3. PATTERNS -> ARRANGEMENT (the recommended workflow)
+----------------------------------------------------
+1. Open the Channel Rack (F6), pick an instrument, and tap in up to 16 steps.
+2. Press "Place Pattern" (or the square pattern button) — Misuc materializes
+   the rack into a real MIDI region ("Pattern N") on a Sequencer track, on the
+   song grid, and switches to the Playlist.
+3. Repeat to build more Patterns. In the Playlist you can:
+   - click the ruler to move the playhead,
+   - drag a region to move it, drag its edge to resize or trim,
+   - right-click a region for Rename / Duplicate / Slice Here / Open in Piano
+     Roll / Delete,
+   - Space to Play / Stop, R to Record.
+4. Play! The transport resumes from the playhead; the ruler and both editors
+   follow the caret.
+
+4. PIANO ROLL (F7)
+------------------
+Select a track (or open a region from the Playlist context menu). The grid
+covers the full MIDI range 0..127 with the velocity lane underneath.
+Left-click the grid = add a note; drag a note to move/resize it; drag in the
+velocity lane to shape velocity; the piano keys on the left audition notes as
+you hover. Clicking the ruler above the grid seeks. If a track has no region
+yet, the first note you draw auto-creates one ("MIDI 1").
+
+5. CHANNEL RACK (F6)
+--------------------
+Choose a pattern instrument and a bank of up to 16 steps. Each gated step
+becomes a real note when you press Place Pattern. "Reset" clears the steps.
+
+6. BROWSER (F8)
+---------------
+The top-left tree categorises content:
+  All Samples / Current Project - real audio found in your Music, Samples and
+                                  Sounds folders (and the live project clips).
+  Instruments / Audio Effects / MIDI / Plugins - built-in studio content.
+Select an audio file to load a real preview (channels, sample rate, length).
+Press the audition (preview) button to play the actual sample file through the
+engine; press + to drop it into the Playlist as an audio clip; or drag the row
+straight onto the grid. Use "Scan Sample Pack Folder…" to add any extra folder
+of samples.
+
+7. RECORDING (R)
+----------------
+Press R (or the red record button) to arm. Misuc starts the transport at the
+recording start and captures live input. Press R again to stop: the take is
+staged next to your project and placed as a new audio clip on the selected
+track at the exact beat it started.
+
+8. GRID, METRONOME, MODES
+-------------------------
+  N           - snap to grid on/off.
+  M           - metronome + two-bar count-in on/off.
+  Song/Pattern mode toggles how the playlist lay out edits.
+
+9. PROJECTS
+-----------
+File > New, Open (a .misuc project with regions and clips), Save/Save As.
+Export WAV renders the full arrangement offline to a file, then restores your
+audio device. The project file stores patterns as real MIDI regions.
+
+All keyboard shortcuts and commands are also visible in the Hint Bar at the
+bottom of the window as you move the mouse.

@@ -90,6 +90,26 @@ public:
   // transport is stopped.
   void previewNote(double freq, float velocity);
 
+  // Jump the transport playhead to `beat` (beats from the song start). The
+  // transport keeps its current play/pause state: playing continues from the
+  // new position, stopped/paused stay stopped with the caret at the new spot.
+  // Applied on the audio thread; call from any non-RT thread.
+  void seekToBeat(double beat);
+
+  // Publish the effective end of the arrangement (beats). Normal (non-loop)
+  // playback stops when the playhead reaches this beat, so an empty project
+  // (end == 0) never plays and playback never runs past the content. Loop
+  // playback is unaffected and spins its own range. Publish again whenever the
+  // arrangement content changes. RT-safe; call from any non-RT thread.
+  void setContentEnd(double endBeats);
+
+  // Preview a whole sample (e.g. a browser audition or metronome click) as a
+  // non-looping one-shot from the current wall clock. `interleaved` holds
+  // `channels` (1 or 2) interleaved float samples at the engine's sample rate;
+  // the engine publishes it RT-safely and arms it on the audio thread. The
+  // transport does not need to be running for the preview to sound.
+  void previewSample(std::vector<float> interleaved, uint32_t channels);
+
   // Recording -------------------------------------------------------------
   // Capture the live audio input into an internal mono ring. startRecord()
   // allocates the (bounded) capture buffer off the real-time thread; capture
@@ -169,6 +189,11 @@ private:
   bool grooveEnabled_ = false;
   double toneFreq_ = 440.0;
   double sampleRate_ = 48000.0;
+  // Effective arrangement end in beats (UI-published). -1.0 means "not yet
+  // published": normal playback then runs freely (the UI always publishes
+  // before/at the first transport start). 0.0 means an empty arrangement,
+  // which blocks playback start and stops immediately.
+  double contentEndBeats_ = -1.0;
   core::Smoother masterSmoother_;
   core::Smoother monitorSmoother_;
   float monitorGain_ = 0.f;
@@ -251,6 +276,23 @@ private:
   // Monotonic wall-clock frame counter (independent of transport) used for
   // note audition previews; incremented every process() block.
   uint64_t wallFrames_ = 0;
+
+  // One-shot sample preview (browser audition / metronome accent). The control
+  // thread publishes decoded samples through the same triple-buffer pattern as
+  // scores, then arms them with a PreviewSample control message; the audio
+  // thread renders the armed slot against the wall clock until consumed. The
+  // data pointer is only dereferenced while the slot is held via refs.
+  struct PreviewSlot {
+    std::vector<float> samples; // interleaved, channels = 1 or 2
+    std::atomic<int> refs{0};
+  };
+  PreviewSlot previewSlots_[3];
+  std::atomic<int> livePreviewSlot_{-1};
+  int previewPublishSlot_ = 0;
+  // Audio-thread-owned one-shot preview state.
+  bool previewActive_ = false;
+  uint64_t previewStartWall_ = 0;
+  uint32_t previewChannels_ = 2;
 
   uint64_t lastProcessPosition_ = 0;
 };

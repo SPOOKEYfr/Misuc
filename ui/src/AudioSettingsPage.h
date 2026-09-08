@@ -33,6 +33,12 @@ public:
   // stream after an offline export that had to stop it.
   void restartStream();
 
+  // Best-effort one-shot start at application launch so the engine is live and
+  // Play/record immediately advance the playhead against a real device
+  // (48 kHz / 256 frames on the first enumerated output). Failure is silent;
+  // the Audio Settings page keeps its honest running/failed status.
+  void autoStart();
+
 private Q_SLOTS:
   void refreshDevices();
   void openDevice();

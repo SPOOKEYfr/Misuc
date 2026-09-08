@@ -19,6 +19,7 @@ public:
   explicit TransportBar(misuc::engine::AudioEngine& engine, QWidget* parent = nullptr);
 
   void setCountInOn(bool on);
+  bool countInOn() const { return countIn_; }
   void setLoopOn(bool on);
   void setRecording(bool on) { recording_ = on; update(); }
   void setSnapOn(bool on);

@@ -44,9 +44,31 @@ struct AudioClip {
   bool operator==(const AudioClip&) const = default;
 };
 
-// A track holds note events, audio clips, and mixer state. Mixer parameters
-// (gainDb, pan, mute, solo) are model-owned so they can be automated and
-// persisted independently of any UI. Pan is in [-1,+1] (L..R, 0 = center).
+// A MIDI region on a track's timeline: a named, time-bounded block of notes.
+// Notes are stored in LOCAL time (relative to the region's own start), so the
+// region can be moved, resized, sliced, duplicated and pasted without touching
+// the note timestamps; the engine only ever hears the flattened absolute forms
+// (region.startBeats + note.startBeats). A track carries zero or more regions.
+struct MidiRegion {
+  std::string id;
+  std::string name;
+  double startBeats = 0.0;     // placement on the track timeline
+  double durationBeats = 4.0;  // length on the track timeline
+  std::vector<NoteEvent> notes; // local beats relative to region start
+
+  bool operator==(const MidiRegion&) const = default;
+};
+
+// A track holds note events, audio clips, MIDI regions, and mixer state. Mixer
+// parameters (gainDb, pan, mute, solo) are model-owned so they can be
+// automated and persisted independently of any UI. Pan is in [-1,+1]
+// (L..R, 0 = center).
+//
+// `notes` is the legacy whole-track form: it survives for backward
+// compatibility with older documents and schedules that wrote absolute beats.
+// A track with at least one region ignores legacy notes during playback (see
+// engine::buildMidiScore); old projects without regions are migrated into a
+// single region at load.
 struct Track {
   std::string id;
   std::string name;
@@ -55,6 +77,7 @@ struct Track {
   float gainDb = 0.0f;
   float pan = 0.0f; // -1 = left, 0 = center, +1 = right
   std::vector<NoteEvent> notes;
+  std::vector<MidiRegion> regions;
   std::vector<AudioClip> clips;
 
   bool operator==(const Track&) const = default;
@@ -98,6 +121,12 @@ public:
   float masterGainDb() const { return masterGainDb_; }
   void setMasterGainDb(float db) { masterGainDb_ = db; }
 
+  // Effective end of the arrangement in beats: the latest point any audio
+  // clip, MIDI region (including notes that overhang the region's duration),
+  // or legacy whole-track note reaches. Returns 0.0 when the project is empty.
+  // The transport stops at this beat so playback never runs past the content.
+  double contentEndBeats() const;
+
   // Tracks ----------------------------------------------------------------
   const std::vector<Track>& tracks() const { return tracks_; }
   std::vector<Track>& tracks() { return tracks_; }
@@ -111,6 +140,21 @@ public:
   // Adds an audio clip to the given track and returns its stable id. The clip
   // id is generated here (ignoring any caller-set id) so it stays unique.
   std::string addClip(const std::string& trackId, AudioClip clip);
+
+  // Regions ---------------------------------------------------------------
+  // Adds a MIDI region to the given track and returns its stable id (any
+  // caller-set id is replaced). `startBeats`/`durationBeats` are the region's
+  // placement on the track timeline; its notes use local coordinates. Returns
+  // an empty string when the track does not exist.
+  std::string addRegion(const std::string& trackId, std::string name,
+                        double startBeats, double durationBeats);
+  MidiRegion* findRegion(const std::string& trackId, const std::string& regionId);
+  const MidiRegion* findRegion(const std::string& trackId,
+                               const std::string& regionId) const;
+  bool removeRegion(const std::string& trackId, const std::string& regionId);
+  // Duplicates a region (fresh unique id, copied notes) starting one region
+  // length after the source by default; returns the new id (empty on failure).
+  std::string duplicateRegion(const std::string& trackId, const std::string& regionId);
 
   // Serialize to .misuc text.
   std::string toJson() const;
@@ -133,6 +177,7 @@ public:
 private:
   std::string newTrackId();
   std::string newClipId();
+  std::string newRegionId();
 
   std::string name_ = "Untitled";
   double tempo_ = 120.0;
@@ -146,6 +191,7 @@ private:
   std::vector<Track> tracks_;
   uint32_t trackCounter_ = 0;
   uint32_t clipCounter_ = 0;
+  uint32_t regionCounter_ = 0;
 };
 
 } // namespace misuc::project

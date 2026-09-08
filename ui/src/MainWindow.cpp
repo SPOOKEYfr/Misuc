@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <utility>
 
@@ -9,15 +10,18 @@
 #include <QCloseEvent>
 #include <QDateTime>
 #include <QDockWidget>
+#include <QDialog>
 #include <QDir>
 #include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFont>
 #include <QLabel>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPainter>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSettings>
 #include <QShortcut>
@@ -49,6 +53,7 @@
 #include "channel/ChannelRack.h"
 #include "browser/Browser.h"
 #include "inspector/Inspector.h"
+#include "project/DemoProject.h"
 #include "workspace/WorkspaceManager.h"
 #include "commands/MisucCommandRegistry.h"
 
@@ -85,7 +90,7 @@ workspaces::Id wsIdFromString(const QString& id) {
 MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
   resize(1280, 800);
   setMinimumSize(1000, 640);
-  setWindowTitle(QStringLiteral("Untitled * - Misuc"));
+  updateWindowTitle(); // clean slate: "Untitled - Misuc" (no phantom dirty star)
 
   buildMenus();
 
@@ -139,6 +144,12 @@ MainWindow::MainWindow(misuc::engine::AudioEngine& engine) : engine_(engine) {
   rebuildMidiScore();
   rebuildClipScore();
   mixerPage_->syncToEngine();
+
+  // P1: bring the audio backend up at launch (best effort) so Play/record work
+  // immediately on a real device, instead of waiting for the Audio Settings
+  // page. If the device is unavailable the engine stays down and the status
+  // strip reports it honestly.
+  audioSettings_->autoStart();
 
   // Workspace hotkeys (F5 Playlist, F6 Channel Rack, F7 Piano Roll,
   // F8 Browser, F9 Mixer) - each reveals and focuses its workspace.
@@ -242,6 +253,8 @@ void MainWindow::buildMenus() {
                   QKeySequence::New);
   file->addAction(QStringLiteral("&Open..."), this, &MainWindow::openDialog,
                   QKeySequence::Open);
+  file->addAction(QStringLiteral("New &Demo Project..."), this,
+                  &MainWindow::openDemoProject);
   file->addSeparator();
   file->addAction(QStringLiteral("&Save"), this, &MainWindow::saveProject,
                   QKeySequence::Save);
@@ -350,6 +363,8 @@ void MainWindow::buildMenus() {
 
   // Help
   QMenu* help = menuBar()->addMenu(QStringLiteral("&Help"));
+  help->addAction(QStringLiteral("&User Guide..."), this,
+                  &MainWindow::showUserGuide);
   help->addAction(QStringLiteral("&About Misuc..."), this,
                   &MainWindow::showAbout);
 }
@@ -402,8 +417,14 @@ void MainWindow::buildPages() {
   connect(playlist_, &Playlist::edited, this, &MainWindow::onSessionEdited);
   connect(inspector_, &Inspector::editRequest, this,
           &MainWindow::onInspectorEdit);
-  connect(channelRack_, &ChannelRack::edited, this,
-          [this] { /* channel rack persists via QSettings, not the session */ });
+  connect(channelRack_, &ChannelRack::edited, this, [this] {
+    // The rack model persists via QSettings (not the session); when pattern
+    // playback is armed, republish the steps so edits audition live.
+    if (rackPatternLive_)
+      rebuildRackScore();
+  });
+  connect(channelRack_, &ChannelRack::patternLiveChanged, this,
+          &MainWindow::onRackPatternLive);
 
   // Track selection is mirrored between the editor list, the mixer strips,
   // the playlist lanes and the inspector; echo states are never re-broadcast.
@@ -430,6 +451,15 @@ void MainWindow::buildPages() {
   connect(editorPage_->piano(), &PianoRoll::audition, this,
           [this](double freq, float vel) { engine_.previewNote(freq, vel); });
 
+  // Ruler click in the piano roll parks the transport caret (seek) so you can
+  // drop the playhead before pressing Play — a real, engine-driven seek.
+  connect(editorPage_->piano(), &PianoRoll::seekRequested, this,
+          [this](double beat) { engine_.seekToBeat(beat); });
+
+  // Playlist ruler click also seeks the engine transport caret.
+  connect(playlist_, &Playlist::seekRequested, this,
+          [this](double beat) { engine_.seekToBeat(beat); });
+
   // Starter sounds: audition the selected channel's base pitch through the real
   // engine voice at its channel volume (no fabricated samples — honest preview).
   connect(channelRack_, &ChannelRack::previewRequested, this,
@@ -443,15 +473,74 @@ void MainWindow::buildPages() {
               vel = std::clamp(ch[row].volume, 0.05f, 1.0f);
             engine_.previewNote(freq, vel);
           });
-  connect(browser_, &Browser::previewRequested, this, [this] {
-    engine_.previewNote(220.0, 0.5f);
+
+  // Place Pattern: materialize the active step bank into a real session MIDI
+  // region (4 beats, one 1/16 gate per step) on the "Sequencer" track, so it
+  // becomes fully editable in the piano roll and arrangement alike.
+  connect(channelRack_, &ChannelRack::placePatternRequested, this, [this] {
+    std::string trackId;
+    for (auto& t : session_.tracks())
+      if (t.name == "Sequencer")
+        trackId = t.id;
+    if (trackId.empty())
+      trackId = session_.addTrack("Sequencer");
+    auto* t = session_.findTrack(trackId);
+    if (!t)
+      return;
+    double start = 0.0;
+    for (auto& r : t->regions)
+      start = std::max(start, r.startBeats + r.durationBeats);
+    for (auto& c : t->clips)
+      start = std::max(start, c.startBeats + c.durationBeats);
+    const int bank = channelRack_->pattern();
+    const std::string rid = session_.addRegion(
+        trackId, "Pattern " + std::to_string(bank + 1), start, 4.0);
+    auto* region = session_.findRegion(trackId, rid);
+    if (!region)
+      return;
+    const auto& chs = channelRack_->channels();
+    for (int row = 0; row < (int)chs.size(); ++row) {
+      if (chs[row].muted)
+        continue;
+      const double freq = channelRack_->previewFreq(row);
+      const int pitch = std::clamp(
+          static_cast<int>(std::lround(69.0 + 12.0 * std::log2(
+                            freq / 440.0))), 0, 127);
+      for (int step = 0; step < 16; ++step) {
+        if (!chs[row].steps[bank][step])
+          continue;
+        misuc::project::NoteEvent n;
+        n.pitch = static_cast<uint8_t>(pitch);
+        n.velocity = 100;
+        n.startBeats = step * 0.25;
+        n.durationBeats = 0.24;
+        region->notes.push_back(n);
+      }
+    }
+    t = session_.findTrack(trackId);
+    if (playlist_) {
+      playlist_->selectTrack(QString::fromStdString(trackId));
+      playlist_->refresh();
+    }
+    onSessionEdited();
+    wsMan_->showWorkspace(workspaces::Id::Playlist, true);
+  });
+  // Real sample audition: the selected browser file plays through the engine's
+// one-shot sample preview pipeline (honest playback, not a synthesized beep).
+  connect(browser_, &Browser::previewFile, this, [this](const QString& path) {
+    misuc::audio::AudioBuffer b;
+    std::string err;
+    if (!misuc::audio::readAudioFile(path.toStdString(), b, err))
+      return;
+    engine_.previewSample(std::move(b.samples), std::max<uint32_t>(1, b.channels));
   });
 
-  // Playlist → piano-roll handoff: Open in Piano Roll.
+  // Playlist → piano-roll handoff: Open in Piano Roll (region-aware).
   connect(playlist_, &Playlist::openInPianoRoll, this,
-          [this](const QString& trackId) {
+          [this](const QString& trackId, const QString& regionId) {
             wsMan_->showWorkspace(workspaces::Id::PianoRoll, true);
             editorPage_->selectTrack(trackId, true);
+            editorPage_->piano()->setRegion(trackId, regionId);
             editorPage_->piano()->setFocus(Qt::ShortcutFocusReason);
           });
 
@@ -509,7 +598,9 @@ void MainWindow::buildPages() {
   browser_->attachHints(hints_);
   transport_->attachHints(hints_);
   headerBar_->attachHints(hints_);
+  mixerPage_->attachHints(hints_);
 
+  applyContentEndToEngine();
   mixerPage_->syncToEngine();
 }
 
@@ -518,6 +609,7 @@ void MainWindow::onSessionEdited() {
   dirty_ = true;
   applyTempoToEngine();
   applyLoopToEngine(session_);
+  applyContentEndToEngine();
   rebuildMidiScore();
   rebuildClipScore();
   mixerPage_->syncFromSession();
@@ -549,6 +641,65 @@ void MainWindow::rebuildClipScore() {
   std::string err;
   misuc::engine::buildClipScore(session_, clips, storage, err);
   engine_.setClips(std::move(clips), std::move(storage));
+}
+
+void MainWindow::onRackPatternLive(bool live) {
+  rackPatternLive_ = live;
+  if (live) {
+    // Pattern playback owns the engine score and loops its own 4 beats (one
+    // 16-step lane) through the real-time transport. Start the transport so
+    // the loop actually spins.
+    if (!engine_.isTransportPlaying()) {
+      // Ensure the engine knows a playable span exists before Play is drained:
+      // the transport's corpus runs 0..4 under the loop, so content end = 4.
+      engine_.setContentEnd(4.0);
+      engine_.play(false);
+    }
+    rebuildRackScore();
+    engine_.setLoop(true, 0.0, 4.0);
+  } else {
+    // Hand the score back to the session document and restore its loop.
+    rebuildMidiScore();
+    applyLoopToEngine(session_);
+  }
+}
+
+void MainWindow::rebuildRackScore() {
+  std::vector<misuc::dsp::MidiNote> notes;
+  const auto& ch = channelRack_->channels();
+  const int bank = channelRack_->pattern();
+  // Swing delays the off-beat 16ths toward the following step (per cent of a
+  // sixteenth); main beats stay put, odd steps shift.
+  const double swingShift = 0.25 * (channelRack_->swing() / 100.0);
+  bool anySolo = false;
+  for (const auto& c : ch)
+    if (c.solo) anySolo = true;
+  for (int row = 0; row < ch.size(); ++row) {
+    const ChannelRack::Channel& c = ch[row];
+    if (c.muted)
+      continue;
+    if (anySolo && !c.solo)
+      continue;
+    for (int step = 0; step < 16; ++step) {
+      if (step >= c.steps[bank].size() || !c.steps[bank][step])
+        continue;
+      misuc::dsp::MidiNote mn;
+      double start = step * 0.25;
+      if ((step & 1) && swingShift > 0.0)
+        start += swingShift;
+      mn.startBeats = start;
+      mn.durationBeats = 0.20;
+      mn.freq = channelRack_->previewFreq(row);
+      mn.gain = c.volume;
+      mn.track = static_cast<uint32_t>(row);
+      notes.push_back(mn);
+    }
+  }
+  std::sort(notes.begin(), notes.end(),
+            [](const misuc::dsp::MidiNote& a, const misuc::dsp::MidiNote& b) {
+              return a.startBeats < b.startBeats;
+            });
+  engine_.setScore(std::move(notes));
 }
 
 void MainWindow::onRecordToggled(bool on) {
@@ -855,7 +1006,12 @@ void MainWindow::buildCommands() {
   reg.registerCommand({mo("transport.record"), mo("Record"),
       mo("Arm / disarm clip recording"), mo("Transport"), icons::IconId::Record,
       QKeySequence(Qt::Key_R), nullptr,
-      [this] { return !engine_.isRecording(); }, nullptr, nullptr});
+      [this] { return !engine_.isRecording(); }, nullptr,
+      [this] {
+        const bool on = !engine_.isRecording();
+        transport_->setRecording(on);
+        onRecordToggled(on);
+      }});
   reg.registerCommand({mo("transport.metronome"), mo("Metronome"),
       mo("Toggle the click and count-in lead-in"), mo("Transport"),
       icons::IconId::Metronome, QKeySequence(Qt::Key_M), nullptr,
@@ -903,6 +1059,23 @@ void MainWindow::showAbout() {
   dlg.exec();
 }
 
+void MainWindow::showUserGuide() {
+  QFile guide(QStringLiteral(":/help/user-guide.txt"));
+  QString text;
+  if (guide.open(QIODevice::ReadOnly | QIODevice::Text))
+    text = QString::fromUtf8(guide.readAll());
+  QDialog dlg(this);
+  dlg.setWindowTitle(QStringLiteral("Misuc User Guide"));
+  dlg.resize(560, 620);
+  auto* lay = new QVBoxLayout(&dlg);
+  auto* view = new QPlainTextEdit(&dlg);
+  view->setReadOnly(true);
+  view->setPlainText(text);
+  view->setFont(QFont(QStringLiteral("monospace"), 10));
+  lay->addWidget(view);
+  dlg.exec();
+}
+
 void MainWindow::closeEvent(QCloseEvent* event) {
   if (!confirmDiscard()) {
     event->ignore();
@@ -926,6 +1099,7 @@ void MainWindow::newProject() {
   mixerPage_->refresh();
   mixerPage_->syncToEngine();
   applyTempoToEngine();
+  applyContentEndToEngine();
   rebuildMidiScore();
   rebuildClipScore();
   undoCmd_->setEnabled(false);
@@ -941,6 +1115,18 @@ void MainWindow::openDialog() {
       QStringLiteral("Misuc project (*.misuc)"));
   if (!path.isEmpty())
     openProject(path);
+}
+
+void MainWindow::openDemoProject() {
+  if (!confirmDiscard())
+    return;
+  DemoPaths paths;
+  QString err;
+  if (!ensureDemoProject(paths, err)) {
+    QMessageBox::warning(this, QStringLiteral("Demo unavailable"), err);
+    return;
+  }
+  openProject(paths.project);
 }
 
 void MainWindow::openProject(const QString& path) {
@@ -970,6 +1156,7 @@ void MainWindow::openProject(const QString& path) {
   mixerPage_->syncToEngine();
   applyTempoToEngine();
   applyLoopToEngine(session_);
+  applyContentEndToEngine();
   rebuildMidiScore();
   rebuildClipScore();
   undoCmd_->setEnabled(false);
@@ -1019,6 +1206,7 @@ void MainWindow::performUndo() {
   mixerPage_->syncToEngine();
   applyTempoToEngine();
   applyLoopToEngine(session_);
+  applyContentEndToEngine();
   rebuildMidiScore();
   rebuildClipScore();
   dirty_ = true;
@@ -1037,6 +1225,7 @@ void MainWindow::performRedo() {
   mixerPage_->syncToEngine();
   applyTempoToEngine();
   applyLoopToEngine(session_);
+  applyContentEndToEngine();
   rebuildMidiScore();
   rebuildClipScore();
   dirty_ = true;
@@ -1046,6 +1235,10 @@ void MainWindow::performRedo() {
 }
 
 void MainWindow::applyTempoToEngine() { engine_.setTempo(session_.tempo()); }
+
+void MainWindow::applyContentEndToEngine() {
+  engine_.setContentEnd(session_.contentEndBeats());
+}
 
 void MainWindow::applyLoopToEngine(misuc::project::Session& s) {
   engine_.setLoop(s.loopMode(), s.loopStart(), s.loopEnd());

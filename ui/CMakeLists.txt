@@ -31,6 +31,7 @@ add_executable(misuc_app
   src/channel/ChannelRack.cpp
   src/browser/Browser.cpp
   src/inspector/Inspector.cpp
+  src/project/DemoProject.cpp
   src/workspace/WorkspaceManager.cpp)
 
 qt_add_resources(misuc_app MISUC_ASSETS

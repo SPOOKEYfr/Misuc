@@ -494,6 +494,12 @@ engine code changed.
     lanes gain a divider every four steps. Audio pipeline remains frozen, so
     swing/pattern are sequencer-model controls documented as pending the
     unfrozen playback path — never faked as DSP.
+  - **Phase 14.4**: Pattern Play toggle arms real-time sequencing — publishes
+    the active bank as a MidiNote score via the engine's setScore() + setLoop()
+    public APIs, looping 0..4 beats; swing offsets odd 16ths, mute/solo/volume
+    are honoured. No engine code was changed. A first-run Demo project (160
+    notes + a generated pad clip) is written under AppDataLocation/MisucDemo and
+    loaded automatically; File > New Demo Project… reopens it on demand.
 - **Browser** (left dock): category tree (All Samples, Current Project,
   Instruments, Audio Effects, MIDI, Plugins — plugin rows are informational
   only, no fake DSP), recursive sample scan (Music + home music dirs, capped

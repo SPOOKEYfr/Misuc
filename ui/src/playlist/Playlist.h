@@ -17,12 +17,13 @@ class HintManager;
 
 // Playlist workspace (master spec §12-20, §71): a real arrangement view bound
 // to the Session. Left column = track headers; main area = timeline lanes with
-// the ruler on top, real audio clips rendered per type (coarse waves for real
-// audio, note-minibars for MIDI regions), and a violet playhead driven by the
-// engine transport. Edits (move, resize-right, trim-left, duplicate, split,
-// delete, mute, rename, snap-to-grid) mutate the Session and emit edited(),
-// exactly like the piano roll. Files dropped from the browser are imported
-// into the selected track at the drop beat (real asset copy + clip).
+// the ruler on top, real audio clips (coarse waves) and real MIDI regions
+// (note-minibars) that mirror the session model, and a violet playhead driven
+// by the engine transport. Clips and regions natively support move, resize,
+// trim, slice, duplicate, rename, delete, marquee multi-select, copy/paste and
+// snap-to-grid; double-clicking a region opens it in the piano roll. Files
+// dropped from the browser are imported into the selected track at the drop
+// beat (real asset copy + clip). All edits mutate the Session and emit edited().
 class Playlist : public QWidget {
   Q_OBJECT
 public:
@@ -32,6 +33,8 @@ public:
     int trackRow = -1;
     int clipIndex = -1; // -1 when the selection is a track/MIDI region
     bool midiRegion = false;
+    QString regionId;
+    QString regionName;
     bool hasClips = false;
     QString clipName;
     QString clipSource;
@@ -53,10 +56,12 @@ public:
   void feedPlayhead(bool playing, double beats);
   void setSnap(bool on);
   void setSongMode(bool song);
+  void setToolBrush(bool slice); // slice tool on/off
   void selectTrack(const QString& id);
   void clearSelection();
 
   QString selectedTrackId() const;
+  QString selectedRegionId() const;
   int selectedClipRow() const; // -1 when nothing is selected
   bool hasSelection() const;
   SelectionSummary selectionSummary() const;
@@ -72,8 +77,12 @@ public:
 signals:
   void edited();
   void selectionChanged();
-  void openInPianoRoll(const QString& trackId);
+  // Always carries the target region id (empty when opening a track without
+  // regions), so the piano roll binds to the exact region you clicked.
+  void openInPianoRoll(const QString& trackId, const QString& regionId);
   void trackSelected(const QString& id);
+  // Ruler click request: park the transport caret at this global beat.
+  void seekRequested(double beat);
 
 protected:
   void keyPressEvent(QKeyEvent* event) override;

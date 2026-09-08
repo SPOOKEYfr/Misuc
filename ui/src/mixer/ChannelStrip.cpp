@@ -2,6 +2,7 @@
 
 #include <QHBoxLayout>
 #include <QMouseEvent>
+#include <QPointer>
 #include <QLabel>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -10,6 +11,8 @@
 #include <cmath>
 
 #include "../Theme.h"
+#include "../HintSystem.h"
+#include "../branding/Icons.h"
 #include "Fader.h"
 #include "Knob.h"
 #include "VerticalMeter.h"
@@ -32,7 +35,7 @@ ChannelStrip::ChannelStrip(const QString& id, QWidget* parent)
   nameRow->setSpacing(4);
   auto* dot = new QLabel(this);
   dot->setFixedSize(8, 8);
-  color_ = QColor(0xff, 0x6b, 0x4a);
+  color_ = theme::kAccentSoft;
   dot->setStyleSheet(QStringLiteral("background: %1; border-radius: 4px;")
                          .arg(color_.name()));
   nameLabel_ = new QLabel(QStringLiteral("Track"), this);
@@ -149,6 +152,74 @@ void ChannelStrip::setSelected(bool on) {
 void ChannelStrip::setLevels(float peakL, float rmsL, float peakR, float rmsR,
                              bool clipped) {
   meter_->setLevels(peakL, rmsL, peakR, rmsR, clipped);
+}
+
+namespace {
+// Shared dB display helper: -inf for fully closed faders.
+inline QString dbText(float db) {
+  return db <= -90.f ? QStringLiteral("-inf")
+                     : QString::number(db, 'f', 1) + QStringLiteral(" dB");
+}
+inline QString panText(int pan) {
+  if (pan < -1) return QStringLiteral("L%1").arg(-pan);
+  if (pan > 1) return QStringLiteral("R%1").arg(pan);
+  return QStringLiteral("C");
+}
+} // namespace
+
+void ChannelStrip::attachHints(HintManager* hints) {
+  if (!hints)
+    return;
+  // Every live-value provider is guarded with a QPointer so the HintManager
+  // never dereferences a strip that is being rebuilt/destroyed.
+  const QPointer<ChannelStrip> self(this);
+  const QString n = name_;
+  hints->registerTool(fader_, QStringLiteral("%1 · Volume").arg(n),
+                      QStringLiteral("Per-track fader gain, applied live by the "
+                                     "audio engine to this channel"),
+                      QString(), icons::IconId::None,
+                      [self]() -> QString {
+                        if (self.isNull()) return QString();
+                        return dbText(self->fader_->valueDb());
+                      });
+  hints->registerTool(knob_, QStringLiteral("%1 · Pan").arg(n),
+                      QStringLiteral("Stereo pan (constant-power, centre-detent)"),
+                      QString(), icons::IconId::None,
+                      [self]() -> QString {
+                        if (self.isNull()) return QString();
+                        return panText(self->knob_->value());
+                      });
+  hints->registerTool(muteBtn_, QStringLiteral("%1 · Mute").arg(n),
+                      QStringLiteral("Silence this channel in the mix"),
+                      QString(), icons::IconId::None,
+                      [self]() -> QString {
+                        if (self.isNull()) return QString();
+                        return self->muteBtn_->isChecked() ? QStringLiteral("muted")
+                                                           : QStringLiteral("off");
+                      });
+  hints->registerTool(soloBtn_, QStringLiteral("%1 · Solo").arg(n),
+                      QStringLiteral("Isolate this channel; others fall into "
+                                     "any-solo logic"),
+                      QString(), icons::IconId::None,
+                      [self]() -> QString {
+                        if (self.isNull()) return QString();
+                        return self->soloBtn_->isChecked() ? QStringLiteral("solo")
+                                                           : QStringLiteral("off");
+                      });
+  hints->registerTool(meter_, QStringLiteral("%1 · Level").arg(n),
+                      QStringLiteral("Post-fader signal, peak + RMS both sides"),
+                      QString(), icons::IconId::None,
+                      [self]() -> QString {
+                        if (self.isNull()) return QString();
+                        auto* m = self->meter_;
+                        return QStringLiteral("L %1 / R %2%3")
+                            .arg(dbText(20.f * std::log10(std::max(1e-6f, m->peakL()))),
+                                 dbText(20.f * std::log10(std::max(1e-6f, m->peakR()))),
+                                 m->clipped() ? QStringLiteral(" CLIP") : QString());
+                      });
+  hints->registerTool(nameLabel_, QStringLiteral("%1").arg(n),
+                      QStringLiteral("Click to select this mixer channel"),
+                      QString(), icons::IconId::None, nullptr);
 }
 
 } // namespace misuc::ui

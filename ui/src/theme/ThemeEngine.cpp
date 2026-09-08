@@ -36,15 +36,15 @@ struct PresetRecord {
 };
 
 const PresetRecord kPresets[] = {
-    // Dark, warm-violet studio baseline. This is the long-standing Misuc look,
-    // now keyed to a restrained violet accent (master spec §37).
+    // Obsidian black (the "Misuc Black" signature): near-black foundation,
+    // layered matte charcoals, violet reserved strictly for accents/states.
+    {"Misuc Black", "#0a0a0c", "#101013", "#17171b", "#050506",
+     "#232328", "#2c2c33", "#ececef", "#8b8b94", "#56565e",
+     "#8f7bfa", "#4ade80", "#ff5c5c"},
+    // Dark, warm-violet studio baseline (legacy, kept for back-compat).
     {"Misuc Graphite", "#0d121b", "#151c27", "#1c2531", "#0a0e15",
      "#28303e", "#354054", "#e8edf4", "#8a94a6", "#5b6472",
      "#8f7bfa", "#4ade80", "#ff5c5c"},
-    // Cool midnight blue, blue accent.
-    {"Midnight Blue", "#081120", "#101d31", "#162642", "#050b14",
-     "#24344f", "#314566", "#eaf1fb", "#8fa4c3", "#5c6d8a",
-     "#4f8bff", "#4ade80", "#ff5c5c"},
     // Deep violet creative studio.
     {"Violet Studio", "#120d1e", "#1c1530", "#241b3d", "#0a0713",
      "#312a4d", "#3f3560", "#f0ebfa", "#a294c4", "#6b5f8c",
@@ -85,7 +85,7 @@ QColor blend(const QColor& under, const QColor& over, int alpha255) {
 } // namespace
 
 ThemeEngine::ThemeEngine(QObject* parent) : QObject(parent) {
-  adopt(presetPalette(QStringLiteral("Misuc Graphite")));
+  adopt(presetPalette(QStringLiteral("Misuc Black")));
 }
 
 ThemeEngine::Palette ThemeEngine::presetPalette(const QString& name) {
@@ -115,7 +115,7 @@ ThemeEngine::Palette ThemeEngine::presetPalette(const QString& name) {
     p.glassHighlight = QColor(255, 255, 255, 26);
     return p;
   }
-  return presetPalette(QStringLiteral("Misuc Graphite")); // fallback
+  return presetPalette(QStringLiteral("Misuc Black")); // fallback
 }
 
 QStringList ThemeEngine::presetNames() const {
@@ -210,7 +210,7 @@ void ThemeEngine::pushToTokens() const {
   // Matte-glass chrome layer: near-black base with a faint accent undertone,
   // translucent matte charcoals for every chrome surface. Composited over the
   // base by Qt's backing store, so glass reads on any GPU.
-  theme::kBackdrop = blend(pal_.background, pal_.accent, 12);
+  theme::kBackdrop = blend(pal_.background, pal_.accent, 10);
   theme::kChrome = QColor(pal_.panel);
   theme::kChrome.setAlpha(226);
   theme::kChromeRaised = QColor(pal_.panelRaised);
@@ -324,15 +324,20 @@ QString ThemeEngine::buildStyleSheet() const {
     QMenuBar { background: %16; color: %1; padding: 2px 6px;
                border-bottom: 1px solid %18; }
     QMenuBar::item { background: transparent; padding: 6px 12px; border-radius: 6px; }
-    QMenuBar::item:selected { background: %6; }
+    QMenuBar::item:selected { background: %6; color: %1; }
     QMenu {
-      background-color: %17; color: %1; border: 1px solid %18;
+      background-color: %4; color: %1; border: 1px solid %18;
       border-radius: 8px; padding: 6px;
     }
-    QMenu::item { padding: 6px 22px; border-radius: 4px; }
-    QMenu::item:selected { background-color: %7; color: black; }
+    QMenu::item { padding: 7px 24px 7px 14px; border-radius: 4px; }
+    QMenu::item:selected { background-color: %7; color: #ffffff; }
     QMenu::item:disabled { color: %3; }
     QMenu::separator { height: 1px; background: %18; margin: 6px 8px; }
+    QMenu::icon { padding-left: 6px; }
+    QComboBox QAbstractItemView {
+      background-color: %4; color: %1; border: 1px solid %5;
+      selection-background-color: %7; selection-color: #ffffff;
+    }
     QScrollArea { background: %17; border: none; }
     QScrollBar:vertical { background: %15; width: 10px; margin: 0; }
     QScrollBar::handle:vertical {
@@ -346,12 +351,20 @@ QString ThemeEngine::buildStyleSheet() const {
     }
     QScrollBar::handle:horizontal:hover { background: %9; }
     QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
-    QWidget { background: transparent; }
     QWidget:focus { outline: none; }
     QToolTip {
       background-color: %17; color: %1; border: 1px solid %18;
       padding: 4px 8px;
     }
+    /* HintBar: compact info panel strip (opaque near-black surface). */
+    QWidget#hintBar {
+      background: %16; border-top: 1px solid %18;
+    }
+    QLabel#hintName { color: %1; background: transparent; }
+    QLabel#hintDesc { color: %2; background: transparent; }
+    QLabel#hintValue { color: %13; background: transparent; }
+    QLabel#hintGlyph { background: transparent; }
+    QLabel#hintChip { background: transparent; }
     QCheckBox { color: %1; spacing: 8px; }
     QCheckBox::indicator {
       width: 16px; height: 16px; border: 1px solid %5;
@@ -501,12 +514,12 @@ bool ThemeEngine::saveToFile(const QString& path, QString& err) const {
 
 void ThemeEngine::loadPersisted() {
   QSettings s;
-  const QString preset = s.value(QStringLiteral("theme/preset")).toString();
+  const QString stored = s.value(QStringLiteral("theme/preset")).toString();
+  QString preset = stored;
+  if (preset.isEmpty() || preset == QStringLiteral("Misuc Graphite"))
+    preset = QStringLiteral("Misuc Black"); // legacy navy default migrated
   const QString accentHex = s.value(QStringLiteral("theme/accent")).toString();
-  if (!preset.isEmpty() && setPreset(preset))
-    return;
-  // Only a stored accent survives across presets.
-  if (setPreset(QStringLiteral("Misuc Graphite"))) {
+  if (!preset.isEmpty() && setPreset(preset)) {
     if (!accentHex.isEmpty()) {
       const QColor c(accentHex);
       if (c.isValid()) {

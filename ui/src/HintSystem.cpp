@@ -2,24 +2,19 @@
 
 #include <QEvent>
 #include <QFontMetrics>
+#include <QHBoxLayout>
 #include <QHoverEvent>
 #include <QKeyEvent>
 #include <QMouseEvent>
-#include <QPainter>
-#include <QPainterPath>
 #include <QTimer>
 #include <optional>
 
 #include "Theme.h"
-#include "branding/Icons.h"
 #include "commands/MisucCommandRegistry.h"
 
 namespace misuc::ui {
 
 namespace {
-constexpr int kChipH = 18;
-constexpr int kPad = 10;
-constexpr int kChipGap = 8;
 // Hover shows the hint only after the cursor has settled, so flicking across a
 // toolbar never strobes the status area; keyboard focus shows it immediately.
 constexpr int kHoverDelayMs = 360;
@@ -62,87 +57,81 @@ Hint hintFromCommand(const QString& commandId) {
   return h;
 }
 
-HintBar::HintBar(QWidget* parent) : QLabel(parent) {
+HintBar::HintBar(QWidget* parent) : QWidget(parent) {
   setObjectName(QStringLiteral("hintBar"));
-  setMinimumHeight(26);
-  setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
   setAttribute(Qt::WA_Hover);
+  setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  setMinimumHeight(30);
+  setMaximumHeight(34);
+
+  auto* lay = new QHBoxLayout(this);
+  lay->setContentsMargins(12, 0, 10, 0);
+  lay->setSpacing(8);
+
+  glyph_ = new QLabel(this);
+  glyph_->setObjectName(QStringLiteral("hintGlyph"));
+  glyph_->setFixedSize(18, 18);
+  glyph_->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+  glyph_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+
+  name_ = new QLabel(this);
+  name_->setObjectName(QStringLiteral("hintName"));
+  name_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+  name_->setMinimumWidth(64);
+  name_->setMaximumWidth(280);
+  name_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+  name_->setFont(theme::uiFont(10, QFont::DemiBold));
+
+  desc_ = new QLabel(this);
+  desc_->setObjectName(QStringLiteral("hintDesc"));
+  desc_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  desc_->setMinimumWidth(40);
+  desc_->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+  desc_->setFont(theme::uiFont());
+  desc_->setTextFormat(Qt::PlainText);
+
+  value_ = new QLabel(this);
+  value_->setObjectName(QStringLiteral("hintValue"));
+  value_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Preferred);
+  value_->setMaximumWidth(180);
+  value_->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+  value_->setFont(theme::monoFont(10));
+  value_->setVisible(false);
+
+  chip_ = new QLabel(this);
+  chip_->setObjectName(QStringLiteral("hintChip"));
+  chip_->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+  chip_->setMinimumHeight(20);
+  chip_->setAlignment(Qt::AlignCenter);
+  chip_->setFont(theme::monoFont(9));
+  chip_->setVisible(false);
+
+  lay->addWidget(glyph_);
+  lay->addWidget(name_);
+  lay->addWidget(desc_, 1);
+  lay->addWidget(value_);
+  lay->addWidget(chip_);
+  lay->addStretch(1);
+
+  clearHint();
 }
 
 void HintBar::showHint(const Hint& hint) {
   hint_ = hint;
-  update();
-}
 
-void HintBar::clearHint() {
-  hint_ = Hint{};
-  update();
-}
-
-void HintBar::paintEvent(QPaintEvent*) {
-  QPainter p(this);
-  p.setRenderHint(QPainter::Antialiasing, true);
-  p.setFont(theme::uiFont());
-
-  const int yc = height() / 2;
-
-  // Shortcut chip on the right.
-  int chipW = 0;
-  if (!hint_.shortcut.isEmpty()) {
-    QFont chipFont = theme::monoFont(9);
-    chipFont.setBold(true);
-    QFontMetrics fm(chipFont);
-    chipW = fm.horizontalAdvance(hint_.shortcut) + 16;
-    QRectF chip(width() - chipW - 6, yc - kChipH / 2, chipW, kChipH);
-    QPainterPath path;
-    path.addRoundedRect(chip, 5, 5);
-    p.setPen(Qt::NoPen);
-    p.setBrush(theme::kAccentSoft);
-    p.drawPath(path);
-    p.setPen(theme::kAccent);
-    p.setFont(chipFont);
-    p.drawText(chip, Qt::AlignCenter, hint_.shortcut);
-  }
-
-  // Available draw width.
-  const int avail = width() - kPad - (chipW ? chipW + kChipGap : 0);
-  int x = kPad;
-
-  // Lead icon (registry-backed hints carry the command glyph).
   if (!hint_.icon.isNull()) {
-    const QIcon ic = hint_.icon;
-    const QRectF icr(x, yc - 9, 18, 18);
-    p.drawPixmap(icr, ic.pixmap(18, 18), QRectF(0, 0, 18, 18));
-    x += 24;
+    glyph_->setPixmap(hint_.icon.pixmap(18, 18));
+    glyph_->show();
+  } else {
+    glyph_->hide();
   }
 
-  if (!hint_.name.isEmpty()) {
-    QFont nameFont = theme::uiFont(10, QFont::DemiBold);
-    p.setFont(nameFont);
-    p.setPen(theme::kAccent);
-    const QString name = QFontMetrics(nameFont).elidedText(
-        hint_.name, Qt::ElideRight, avail);
-    p.drawText(QRect(x, 0, name.size(), height()), Qt::AlignVCenter | Qt::AlignLeft,
-               name);
-    x += QFontMetrics(nameFont).horizontalAdvance(name) + 10;
-  }
-  if (!hint_.description.isEmpty()) {
-    p.setFont(theme::uiFont());
-    p.setPen(theme::kTextDim);
-    const int descAvail = avail - (x - kPad);
-    const QString desc = QFontMetrics(theme::uiFont()).elidedText(
-        hint_.description, Qt::ElideRight, qMax(descAvail, 40));
-    p.drawText(QRect(x, 0, descAvail, height()), Qt::AlignVCenter | Qt::AlignLeft,
-               desc);
-  } else if (hint_.value) {
-    p.setFont(theme::uiFont());
-    p.setPen(theme::kTextDim);
-    const int descAvail = avail - (x - kPad);
-    p.drawText(QRect(x, 0, descAvail, height()), Qt::AlignVCenter | Qt::AlignLeft,
-               QStringLiteral("(hold for details)"));
-  }
+  name_->setText(hint_.name);
 
-  // Live value on the right of the text run, before the chip.
+  const bool hasDesc = !hint_.description.isEmpty();
+  desc_->setText(hasDesc ? hint_.description : QString());
+  desc_->setVisible(hasDesc);
+
   if (hint_.value) {
     QString v;
     try {
@@ -151,15 +140,58 @@ void HintBar::paintEvent(QPaintEvent*) {
     } catch (...) {
       v.clear();
     }
-    if (!v.isEmpty()) {
-      const QFont vf = theme::monoFont(10);
-      QFontMetrics vm(vf);
-      const int vw = qMin(vm.horizontalAdvance(v) + 22, 170);
-      p.setFont(vf);
-      p.setPen(theme::kTextSecondary);
-      p.drawText(QRect(x + 8, 0, vw, height()), Qt::AlignVCenter | Qt::AlignLeft,
-                 v);
-    }
+    value_->setText(v);
+    value_->setVisible(!v.isEmpty());
+  } else {
+    value_->setText(QString());
+    value_->setVisible(false);
+  }
+
+  if (!hint_.shortcut.isEmpty()) {
+    chip_->setText(hint_.shortcut);
+    chip_->setStyleSheet(
+        QStringLiteral("background-color: %1; color: %2; border: 1px solid %3;"
+                       "border-radius: 10px; padding: 1px 8px; font-weight: 700;")
+            .arg(theme::kAccentSoft.name(), theme::kAccent.name(),
+                 theme::kAccent.name()));
+    chip_->show();
+  } else {
+    chip_->setText(QString());
+    chip_->hide();
+  }
+
+  elideLabels();
+}
+
+void HintBar::clearHint() {
+  showHint(Hint{});
+}
+
+void HintBar::resizeEvent(QResizeEvent* event) {
+  QWidget::resizeEvent(event);
+  elideLabels();
+}
+
+void HintBar::elideLabels() {
+  if (!name_ || !desc_)
+    return;
+  // Elide against each label's current width so long purpose text never
+  // overflows its cell or the bar (labels share the row via a QHBoxLayout).
+  const QFontMetrics nameFm(name_->font());
+  const int nameW = name_->width();
+  if (nameW > 0)
+    name_->setText(nameFm.elidedText(hint_.name, Qt::ElideRight, nameW));
+  const QFontMetrics descFm(desc_->font());
+  const int descW = desc_->width();
+  const QString fullDesc = hint_.description;
+  if (descW > 0) {
+    desc_->setText(descFm.elidedText(fullDesc, Qt::ElideRight, descW));
+  }
+  const QFontMetrics valFm(value_->font());
+  const int valW = value_->width();
+  if (value_->isVisible() && valW > 0) {
+    const QString fullVal = value_->text();
+    value_->setText(valFm.elidedText(fullVal, Qt::ElideRight, valW));
   }
 }
 
@@ -178,14 +210,47 @@ HintManager::HintManager(HintBar* bar, QWidget* parent)
 
 void HintManager::setDefaultHint(Hint hint) {
   defaultHint_ = std::move(hint);
-  if (!hovered_ && !focused_)
+  if (hovered_.isNull() && focused_.isNull())
     bar_->showHint(defaultHint_);
+}
+
+int HintManager::findEntry(const QWidget* widget) const {
+  for (size_t i = 0; i < entries_.size(); ++i)
+    if (entries_[i].widget == widget && !entries_[i].widget.isNull())
+      return static_cast<int>(i);
+  return -1;
+}
+
+void HintManager::purgeEntry(int index) {
+  if (index < 0 || index >= static_cast<int>(entries_.size()))
+    return;
+  const QWidget* w = entries_[index].widget.data();
+  entries_.erase(entries_.begin() + index);
+  if (hovered_ == w)
+    hovered_.clear();
+  if (focused_ == w)
+    focused_.clear();
 }
 
 void HintManager::registerHint(QWidget* widget, Hint hint) {
   if (!widget)
     return;
-  hints_[widget] = std::move(hint);
+  const int existing = findEntry(widget);
+  if (existing >= 0) {
+    entries_[existing].hint = std::move(hint);
+    entries_[existing].commandId.clear();
+    entries_[existing].resolve = nullptr;
+    return;
+  }
+  entries_.push_back(Entry{QPointer<QWidget>(widget), std::move(hint),
+                           QString(), nullptr});
+  connect(widget, &QObject::destroyed, this, [this, w = QPointer<QWidget>(widget)] {
+    if (w.isNull())
+      return;
+    const int idx = findEntry(w);
+    if (idx >= 0)
+      purgeEntry(idx);
+  });
   widget->installEventFilter(this);
 }
 
@@ -200,7 +265,22 @@ void HintManager::registerHint(QWidget* widget, const QString& name,
 void HintManager::registerCommand(QWidget* widget, const QString& commandId) {
   if (!widget)
     return;
-  commandIds_[widget] = commandId;
+  const int existing = findEntry(widget);
+  if (existing >= 0) {
+    entries_[existing].commandId = commandId;
+    entries_[existing].hint = Hint{};
+    entries_[existing].resolve = nullptr;
+    return;
+  }
+  entries_.push_back(Entry{QPointer<QWidget>(widget), Hint{}, commandId,
+                           nullptr});
+  connect(widget, &QObject::destroyed, this, [this, w = QPointer<QWidget>(widget)] {
+    if (w.isNull())
+      return;
+    const int idx = findEntry(w);
+    if (idx >= 0)
+      purgeEntry(idx);
+  });
   widget->installEventFilter(this);
 }
 
@@ -219,92 +299,99 @@ void HintManager::registerCustom(
     QWidget* widget, std::function<std::optional<Hint>(const QPoint&)> resolve) {
   if (!widget)
     return;
-  customResolvers_[widget] = std::move(resolve);
+  const int existing = findEntry(widget);
+  if (existing >= 0) {
+    entries_[existing].resolve = std::move(resolve);
+    return;
+  }
+  entries_.push_back(
+      Entry{QPointer<QWidget>(widget), Hint{}, QString(), std::move(resolve)});
+  connect(widget, &QObject::destroyed, this, [this, w = QPointer<QWidget>(widget)] {
+    if (w.isNull())
+      return;
+    const int idx = findEntry(w);
+    if (idx >= 0)
+      purgeEntry(idx);
+  });
   widget->installEventFilter(this);
 }
 
 Hint HintManager::hintFor(const QWidget* widget, const QPoint& pos) const {
-  auto itC = customResolvers_.find(const_cast<QWidget*>(widget));
-  if (itC != customResolvers_.end()) {
-    QPoint local = pos;
-    // pos arrives in the widget's own coordinate space from showFor().
-    if (itC->second) {
-      try {
-        const auto r = itC->second(local);
-        if (r)
-          return *r;
-      } catch (...) {
-        return Hint{};
-      }
+  const int idx = findEntry(widget);
+  if (idx < 0)
+    return Hint{};
+  const Entry& e = entries_[idx];
+  if (e.resolve) {
+    try {
+      const auto r = e.resolve(pos);
+      if (r)
+        return *r;
+    } catch (...) {
+      return Hint{};
     }
   }
-  auto itId = commandIds_.find(const_cast<QWidget*>(widget));
-  if (itId != commandIds_.end())
-    return hintFromCommand(itId->second);
-  auto it = hints_.find(const_cast<QWidget*>(widget));
-  return it == hints_.end() ? Hint{} : it->second;
+  if (!e.commandId.isEmpty())
+    return hintFromCommand(e.commandId);
+  return e.hint;
 }
 
 void HintManager::refresh() {
-  if (hovered_) {
-    auto itId = commandIds_.find(hovered_);
-    if (itId != commandIds_.end()) {
-      bar_->showHint(hintFromCommand(itId->second));
-      return;
-    }
-    auto it = hints_.find(hovered_);
-    if (it != hints_.end()) {
-      bar_->showHint(it->second);
+  if (!hovered_.isNull()) {
+    const int idx = findEntry(hovered_);
+    if (idx >= 0) {
+      bar_->showHint(hintFor(hovered_, lastPos_));
       return;
     }
   }
-  if (focused_ && !hovered_) {
-    auto itId = commandIds_.find(focused_);
-    if (itId != commandIds_.end()) {
-      bar_->showHint(hintFromCommand(itId->second));
-      return;
-    }
-    auto it = hints_.find(focused_);
-    if (it != hints_.end()) {
-      bar_->showHint(it->second);
+  if (!focused_.isNull()) {
+    const int idx = findEntry(focused_);
+    if (idx >= 0) {
+      bar_->showHint(entries_[idx].commandId.isEmpty()
+                         ? entries_[idx].hint
+                         : hintFromCommand(entries_[idx].commandId));
       return;
     }
   }
   if (defaultHint_.value) {
-    // Refresh live default value (e.g. transport position).
     bar_->showHint(defaultHint_);
   }
 }
 
 bool HintManager::eventFilter(QObject* watched, QEvent* event) {
   auto widget = qobject_cast<QWidget*>(watched);
-  if (!widget || !widget->isVisible())
+  if (!widget)
+    return false;
+  // A QPointer turns null the moment ~QObject begins, so if this event was
+  // queued into an object currently being destroyed we bail before ever
+  // touching it — this is what previously crashed on mouse-move teardown.
+  const QPointer<QWidget> guard(widget);
+  if (guard.isNull() || findEntry(widget) < 0)
     return false;
   switch (event->type()) {
     case QEvent::Enter:
     case QEvent::HoverEnter: {
-      const QWidget* first = hovered_;
+      const QWidget* first = hovered_.data();
       hovered_ = widget;
       if (hovered_ == first && delay_->isActive())
         return false; // already settling on the same widget
-      // Delay the surface change so sweeping across chrome doesn't strobe.
       if (delay_->isActive())
         delay_->stop();
       delay_->start();
       return false;
     }
     case QEvent::MouseMove:
-    case QEvent::HoverMove:
+    case QEvent::HoverMove: {
       if (widget == hovered_) {
-        const auto itC = customResolvers_.find(widget);
-        if (itC != customResolvers_.end()) {
+        const int idx = findEntry(widget);
+        if (idx >= 0 && entries_[idx].resolve) {
           QPoint local;
           if (event->type() == QEvent::MouseMove)
             local = static_cast<QMouseEvent*>(event)->position().toPoint();
           else
             local = static_cast<QHoverEvent*>(event)->position().toPoint();
+          lastPos_ = local;
           try {
-            const auto r = itC->second(local);
+            const auto r = entries_[idx].resolve(local);
             if (r)
               bar_->showHint(*r);
           } catch (...) {
@@ -312,13 +399,14 @@ bool HintManager::eventFilter(QObject* watched, QEvent* event) {
         }
       }
       return false;
+    }
     case QEvent::HoverLeave:
     case QEvent::Leave:
       if (widget == hovered_) {
-        hovered_ = nullptr;
+        hovered_.clear();
         if (delay_->isActive())
           delay_->stop();
-        if (focused_)
+        if (!focused_.isNull())
           showFor(focused_);
         else
           bar_->showHint(defaultHint_);
@@ -327,7 +415,6 @@ bool HintManager::eventFilter(QObject* watched, QEvent* event) {
     case QEvent::FocusIn:
       if (widget != focused_) {
         focused_ = widget;
-        // Keyboard users must never wait on the hover threshold.
         if (delay_->isActive())
           delay_->stop();
         showFor(widget);
@@ -335,8 +422,8 @@ bool HintManager::eventFilter(QObject* watched, QEvent* event) {
       return false;
     case QEvent::FocusOut:
       if (widget == focused_) {
-        focused_ = nullptr;
-        if (!hovered_)
+        focused_.clear();
+        if (hovered_.isNull())
           bar_->showHint(defaultHint_);
       }
       return false;
@@ -347,7 +434,7 @@ bool HintManager::eventFilter(QObject* watched, QEvent* event) {
 }
 
 void HintManager::settleHover() {
-  if (hovered_)
+  if (!hovered_.isNull())
     showFor(hovered_);
 }
 

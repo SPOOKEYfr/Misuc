@@ -20,6 +20,7 @@ namespace misuc::ui {
 class ChannelStrip;
 class Fader;
 class VerticalMeter;
+class HintManager;
 
 // Real mixer panel: one strip per track (pan, M/S, stereo meter, fader) plus a
 // master bus strip. Strips mirror the Session; edits are reported up via
@@ -47,6 +48,11 @@ public:
   // Select a strip by track id (from the editor's track list).
   void selectTrack(const QString& id);
 
+  // Registers exact-control hints on every channel strip (and the master bus)
+  // so the HintBar shows the live value under the cursor. Called once at shell
+  // build; strips created later by rebuildStrips() self-register too.
+  void attachHints(HintManager* hints);
+
 signals:
   void edited();
   void trackSelected(const QString& id);
@@ -73,6 +79,7 @@ private:
   QLabel* masterReadout_ = nullptr;
   QString selectedId_;
   bool syncing_ = false;
+  HintManager* hints_ = nullptr;
 };
 
 } // namespace misuc::ui

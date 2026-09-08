@@ -2,5 +2,6 @@
     <qresource prefix="/">
         <file alias="icons/misuc-256.png">resources/icons/misuc-256.png</file>
         <file alias="about/obhup.png">resources/about/obhup.png</file>
+        <file alias="help/user-guide.txt">resources/help/user-guide.txt</file>
     </qresource>
 </RCC>

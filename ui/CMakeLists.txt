@@ -56,7 +56,7 @@ install(TARGETS misuc_app RUNTIME DESTINATION bin)
 install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../assets/desktop/misuc.desktop
         DESTINATION share/applications)
 
-foreach(SIZE 16 22 24 32 48 64 128 256)
+foreach(SIZE 16 22 24 32 48 64 128 256 512)
   install(FILES
       ${CMAKE_CURRENT_SOURCE_DIR}/../assets/hicolor/${SIZE}x${SIZE}/apps/misuc.png
       DESTINATION share/icons/hicolor/${SIZE}x${SIZE}/apps)

@@ -3,7 +3,8 @@
 //   tools/rendericons
 // Outputs:
 //   assets/hicolor/<size>x<size>/apps/misuc.png            (desktop theme)
-//   ui/resources/icons/misuc-256.png                        (bundled app icon)
+//   ui/resources/icons/misuc-256.png                      (bundled app icon)
+//   ui/resources/icons/misuc-512.png                      (scalable-capable)
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -23,7 +24,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  const int sizes[] = {16, 22, 24, 32, 48, 64, 128, 256};
+  const int sizes[] = {16, 22, 24, 32, 48, 64, 128, 256, 512};
   QColor accent = misuc::ui::logoAccent();
   QColor soft = misuc::ui::logoAccentSoft();
   for (int s : sizes) {
@@ -48,5 +49,11 @@ int main(int argc, char** argv) {
   if (!pm.save(icon, "PNG"))
     return 1;
   qInfo("wrote %s", qPrintable(icon));
+  const QString icon512 =
+      cwd.filePath(QStringLiteral("ui/resources/icons/misuc-512.png"));
+  const QPixmap pm512 = misuc::ui::logoPixmap(512, accent, soft);
+  if (!pm512.save(icon512, "PNG"))
+    return 1;
+  qInfo("wrote %s", qPrintable(icon512));
   return 0;
 }

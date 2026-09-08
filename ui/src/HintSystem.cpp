@@ -3,9 +3,11 @@
 #include <QEvent>
 #include <QFontMetrics>
 #include <QHoverEvent>
+#include <QKeyEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <QTimer>
 #include <optional>
 
 #include "Theme.h"
@@ -18,6 +20,9 @@ namespace {
 constexpr int kChipH = 18;
 constexpr int kPad = 10;
 constexpr int kChipGap = 8;
+// Hover shows the hint only after the cursor has settled, so flicking across a
+// toolbar never strobes the status area; keyboard focus shows it immediately.
+constexpr int kHoverDelayMs = 360;
 } // namespace
 
 Hint hintFromCommand(const QString& commandId) {
@@ -160,6 +165,10 @@ void HintBar::paintEvent(QPaintEvent*) {
 
 HintManager::HintManager(HintBar* bar, QWidget* parent)
     : QObject(parent), bar_(bar) {
+  delay_ = new QTimer(this);
+  delay_->setSingleShot(true);
+  delay_->setInterval(kHoverDelayMs);
+  connect(delay_, &QTimer::timeout, this, &HintManager::settleHover);
   if (bar_) {
     setDefaultHint(Hint{QStringLiteral("Misuc"),
                         QStringLiteral("Hover any control to learn it"),
@@ -169,7 +178,7 @@ HintManager::HintManager(HintBar* bar, QWidget* parent)
 
 void HintManager::setDefaultHint(Hint hint) {
   defaultHint_ = std::move(hint);
-  if (!hovered_)
+  if (!hovered_ && !focused_)
     bar_->showHint(defaultHint_);
 }
 
@@ -249,6 +258,18 @@ void HintManager::refresh() {
       return;
     }
   }
+  if (focused_ && !hovered_) {
+    auto itId = commandIds_.find(focused_);
+    if (itId != commandIds_.end()) {
+      bar_->showHint(hintFromCommand(itId->second));
+      return;
+    }
+    auto it = hints_.find(focused_);
+    if (it != hints_.end()) {
+      bar_->showHint(it->second);
+      return;
+    }
+  }
   if (defaultHint_.value) {
     // Refresh live default value (e.g. transport position).
     bar_->showHint(defaultHint_);
@@ -259,37 +280,75 @@ bool HintManager::eventFilter(QObject* watched, QEvent* event) {
   auto widget = qobject_cast<QWidget*>(watched);
   if (!widget || !widget->isVisible())
     return false;
-  if (event->type() == QEvent::Enter || event->type() == QEvent::HoverEnter) {
-    if (widget) {
+  switch (event->type()) {
+    case QEvent::Enter:
+    case QEvent::HoverEnter: {
+      const QWidget* first = hovered_;
       hovered_ = widget;
-      showFor(widget);
+      if (hovered_ == first && delay_->isActive())
+        return false; // already settling on the same widget
+      // Delay the surface change so sweeping across chrome doesn't strobe.
+      if (delay_->isActive())
+        delay_->stop();
+      delay_->start();
+      return false;
     }
-  } else if (event->type() == QEvent::MouseMove ||
-             event->type() == QEvent::HoverMove) {
-    if (widget == hovered_) {
-      const auto itC = customResolvers_.find(widget);
-      if (itC != customResolvers_.end()) {
-        QPoint local;
-        if (event->type() == QEvent::MouseMove)
-          local = static_cast<QMouseEvent*>(event)->position().toPoint();
-        else
-          local = static_cast<QHoverEvent*>(event)->position().toPoint();
-        try {
-          const auto r = itC->second(local);
-          if (r)
-            bar_->showHint(*r);
-        } catch (...) {
+    case QEvent::MouseMove:
+    case QEvent::HoverMove:
+      if (widget == hovered_) {
+        const auto itC = customResolvers_.find(widget);
+        if (itC != customResolvers_.end()) {
+          QPoint local;
+          if (event->type() == QEvent::MouseMove)
+            local = static_cast<QMouseEvent*>(event)->position().toPoint();
+          else
+            local = static_cast<QHoverEvent*>(event)->position().toPoint();
+          try {
+            const auto r = itC->second(local);
+            if (r)
+              bar_->showHint(*r);
+          } catch (...) {
+          }
         }
       }
-    }
-  } else if (event->type() == QEvent::Leave ||
-             event->type() == QEvent::HoverLeave) {
-    if (widget == hovered_) {
-      hovered_ = nullptr;
-      bar_->showHint(defaultHint_);
-    }
+      return false;
+    case QEvent::HoverLeave:
+    case QEvent::Leave:
+      if (widget == hovered_) {
+        hovered_ = nullptr;
+        if (delay_->isActive())
+          delay_->stop();
+        if (focused_)
+          showFor(focused_);
+        else
+          bar_->showHint(defaultHint_);
+      }
+      return false;
+    case QEvent::FocusIn:
+      if (widget != focused_) {
+        focused_ = widget;
+        // Keyboard users must never wait on the hover threshold.
+        if (delay_->isActive())
+          delay_->stop();
+        showFor(widget);
+      }
+      return false;
+    case QEvent::FocusOut:
+      if (widget == focused_) {
+        focused_ = nullptr;
+        if (!hovered_)
+          bar_->showHint(defaultHint_);
+      }
+      return false;
+    default:
+      break;
   }
   return QObject::eventFilter(watched, event);
+}
+
+void HintManager::settleHover() {
+  if (hovered_)
+    showFor(hovered_);
 }
 
 void HintManager::showFor(QWidget* widget) {

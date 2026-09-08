@@ -3,6 +3,7 @@
 #include <QIcon>
 #include <QLabel>
 #include <QObject>
+#include <QPoint>
 #include <QString>
 #include <functional>
 #include <optional>
@@ -10,6 +11,7 @@
 
 #include "branding/Icons.h"
 
+class QTimer;
 class QWidget;
 
 namespace misuc::ui {
@@ -39,6 +41,10 @@ public:
 
   void showHint(const Hint& hint);
   void clearHint();
+
+  // Read-only view of the entry currently painted (used by the UI auditors).
+  QString currentName() const { return hint_.name; }
+  bool hasHint() const { return !hint_.name.isEmpty(); }
 
 protected:
   void paintEvent(QPaintEvent* event) override;
@@ -85,6 +91,7 @@ protected:
 private:
   Hint hintFor(const QWidget* widget, const QPoint& pos) const;
   void showFor(QWidget* widget);
+  void settleHover();
 
   HintBar* bar_;
   Hint defaultHint_;
@@ -93,6 +100,8 @@ private:
   std::unordered_map<QWidget*, std::function<std::optional<Hint>(const QPoint&)>>
       customResolvers_;
   QWidget* hovered_ = nullptr;
+  QWidget* focused_ = nullptr;
+  QTimer* delay_ = nullptr;
   QPoint lastPos_;
 };
 

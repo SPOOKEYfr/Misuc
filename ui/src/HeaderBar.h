@@ -15,6 +15,7 @@ class AudioEngine;
 
 namespace misuc::ui {
 
+class HintManager;
 class MiniMeters;
 class TransportBar;
 
@@ -29,6 +30,10 @@ public:
 
   TransportBar* transportBar() const { return transport_; }
   QLabel* navLogo() const { return navLogo_; }
+
+  // Registers the workspace-strip icons and status cluster in the global
+  // HintBar (§78) so every control is discoverable on hover.
+  void attachHints(HintManager* hints);
 
   void refresh();                  // status + meters + cpu/ram
   void setProjectName(const QString& name);

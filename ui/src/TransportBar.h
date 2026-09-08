@@ -8,6 +8,8 @@ class AudioEngine;
 
 namespace misuc::ui {
 
+class HintManager;
+
 // Transport controls: play/stop transport, tempo, count-in toggle, and the
 // formatted bar.beat.sixteenth.subtick position readout. Reads atomic playhead
 // samples from the engine and renders offline; no real-time work here.
@@ -24,6 +26,12 @@ public:
   bool snapOn() const { return snap_; }
   bool songMode() const { return songMode_; }
   void refresh(); // pull playhead + tempo state
+
+  // Hover-intent hints for the painted controls (§78: fully developed hint bar).
+  void attachHints(HintManager* hints);
+
+  // Position readout text for the hint bar.
+  QString positionText() const;
 
 signals:
   void tempoChanged(double bpm);

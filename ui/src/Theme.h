@@ -78,6 +78,18 @@ inline QColor kButtonHover("#283245");
 inline QColor kButtonPressed("#141a24");
 inline QColor kBorderStrong("#3a4660");
 
+// Matte-glass chrome layer (spec §36–§38, §46). The app is drawn over a
+// near-black charcoal base; every chrome surface (header, dock chrome,
+// toolbars, hint bar, tab/menu chrome) is a translucent matte charcoal that
+// composites over it, giving the DAW its smoked-glass depth without needing a
+// compositor. Values here are the Graphite stock; ThemeEngine derives them
+// from the active palette on every apply so glass follows the theme.
+inline QColor kBackdrop("#0a0913");        // charcoal-black base, violet undertone
+inline QColor kChrome(0x0d, 0x10, 0x19, 226);    // matte glass surface
+inline QColor kChromeRaised(0x15, 0x1a, 0x27, 234); // raised glass (chrome front)
+inline QColor kChromeBorder(0x66, 0x74, 0x99, 92); // faint violet-blue seams
+inline QColor kChromeGlowTop(0xff, 0xff, 0xff, 20); // top-edge specular
+
 // Editor + meters (fixed stock values so pixel tests and readability hold).
 inline QColor kGridRow("#232c3b");
 inline QColor kGridStrong("#3a4660");

@@ -206,6 +206,18 @@ void ThemeEngine::pushToTokens() const {
   theme::kButtonHover = blend(pal_.panelRaised, pal_.accent, 70);
   theme::kButtonPressed = pal_.panelSunken;
   theme::kBorderStrong = pal_.borderBright;
+
+  // Matte-glass chrome layer: near-black base with a faint accent undertone,
+  // translucent matte charcoals for every chrome surface. Composited over the
+  // base by Qt's backing store, so glass reads on any GPU.
+  theme::kBackdrop = blend(pal_.background, pal_.accent, 12);
+  theme::kChrome = QColor(pal_.panel);
+  theme::kChrome.setAlpha(226);
+  theme::kChromeRaised = QColor(pal_.panelRaised);
+  theme::kChromeRaised.setAlpha(234);
+  theme::kChromeBorder = QColor(pal_.borderBright);
+  theme::kChromeBorder.setAlpha(92);
+  theme::kChromeGlowTop = QColor(255, 255, 255, 20);
 }
 
 QString ThemeEngine::buildStyleSheet() const {
@@ -223,12 +235,17 @@ QString ThemeEngine::buildStyleSheet() const {
   const QString panelHeader = theme::kPanelHeader.name();
   const QString textSecondary = theme::kTextSecondary.name();
   const QString textMuted = theme::kTextMuted.name();
+  const QString backdrop = theme::kBackdrop.name();
+  const QString chrome = theme::kChrome.name(QColor::HexArgb);
+  const QString chromeRaised = theme::kChromeRaised.name(QColor::HexArgb);
+  const QString chromeBorder = theme::kChromeBorder.name(QColor::HexArgb);
+  const QString chromeGlow = theme::kChromeGlowTop.name(QColor::HexArgb);
 
-  return QStringLiteral(R"(
+  QString qss = QStringLiteral(R"(
     QWidget { color: %1; font-size: 13px; }
-    QMainWindow, QWidget#central { background-color: %2; }
+    QMainWindow, QWidget#central { background-color: %15; }
     QPushButton {
-      background-color: %4; color: %1; border: 1px solid %5;
+      background-color: %4; color: %1; border: 1px solid %16;
       border-radius: 6px; padding: 8px 16px; font-weight: 500;
     }
     QPushButton:hover { background-color: %9; }
@@ -270,16 +287,18 @@ QString ThemeEngine::buildStyleSheet() const {
       background-color: %4; color: %1; border: 1px solid %5;
       padding: 4px 8px;
     }
-    /* Global header strip + dock chrome (charcoal glass). */
+    /* Global header strip + dock chrome (charcoal matte glass). */
     QToolBar {
-      background: %11; border: none; border-bottom: 1px solid %5;
-      spacing: 4px;
+      background: %16; border: none; border-bottom: 1px solid %5;
+      border-top: 1px solid %19; spacing: 4px;
     }
     QToolBar::handle { background: transparent; }
-    QDockWidget { color: %1; titlebar-close-icon: none; }
+    QToolBar QToolButton:hover { border-top: 1px solid %11; }
+    QDockWidget { color: %1; titlebar-close-icon: none;
+                  background: transparent; }
     QDockWidget::title {
-      background: %12; color: %13; padding: 5px 10px;
-      border-bottom: 1px solid %5; font-weight: 600;
+      background: %17; color: %13; padding: 5px 10px;
+      border-bottom: 1px solid %18; font-weight: 600;
     }
     QDockWidget::close-button, QDockWidget::float-button {
       background: transparent; border: none; padding: 2px;
@@ -287,41 +306,52 @@ QString ThemeEngine::buildStyleSheet() const {
     QDockWidget::close-button:hover, QDockWidget::float-button:hover {
       background: %9; border-radius: 3px;
     }
-    QTabWidget::pane { border: 1px solid %5; }
+    QTabWidget::pane { border: 1px solid %18; }
+    QTabBar { background: %15; }
     QTabBar::tab {
-      background: %2; color: %3; padding: 6px 16px;
-      border: 1px solid %5; border-bottom: none; border-top-left-radius: 6px;
+      background: %16; color: %3; padding: 6px 16px;
+      border: 1px solid %18; border-bottom: none; border-top-left-radius: 6px;
       border-top-right-radius: 6px; margin-right: 2px; font-weight: 500;
     }
     QTabBar::tab:selected {
-      background: %4; color: %1; border-top: 2px solid %7;
+      background: %17; color: %1; border-top: 2px solid %7;
     }
-    QTabBar::tab:hover:!selected { background: %4; color: %13; }
-    QStatusBar { background: %2; color: %14; }
+    QTabBar::tab:hover:!selected { background: %17; color: %13;
+                                   border-top: 1px solid %12; }
+    QStatusBar { background: %16; color: %14;
+                 border-top: 1px solid %18; }
     QStatusBar::item { border: none; }
-    QMenuBar { background: %2; color: %1; padding: 2px 6px; }
+    QMenuBar { background: %16; color: %1; padding: 2px 6px;
+               border-bottom: 1px solid %18; }
     QMenuBar::item { background: transparent; padding: 6px 12px; border-radius: 6px; }
     QMenuBar::item:selected { background: %6; }
     QMenu {
-      background-color: %4; color: %1; border: 1px solid %5;
+      background-color: %17; color: %1; border: 1px solid %18;
       border-radius: 8px; padding: 6px;
     }
     QMenu::item { padding: 6px 22px; border-radius: 4px; }
     QMenu::item:selected { background-color: %7; color: black; }
     QMenu::item:disabled { color: %3; }
-    QMenu::separator { height: 1px; background: %5; margin: 6px 8px; }
-    QPushButton#smallButton { padding: 5px 12px; font-weight: 500; }
-    QScrollArea { background: %8; border: none; }
-    QScrollBar:vertical { background: %2; width: 10px; margin: 0; }
+    QMenu::separator { height: 1px; background: %18; margin: 6px 8px; }
+    QScrollArea { background: %17; border: none; }
+    QScrollBar:vertical { background: %15; width: 10px; margin: 0; }
     QScrollBar::handle:vertical {
-      background: %6; min-height: 24px; border-radius: 5px;
+      background: %16; min-height: 24px; border-radius: 5px;
     }
+    QScrollBar::handle:vertical:hover { background: %9; }
     QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-    QScrollBar:horizontal { background: %2; height: 10px; margin: 0; }
+    QScrollBar:horizontal { background: %15; height: 10px; margin: 0; }
     QScrollBar::handle:horizontal {
-      background: %6; min-width: 24px; border-radius: 5px;
+      background: %16; min-width: 24px; border-radius: 5px;
     }
+    QScrollBar::handle:horizontal:hover { background: %9; }
     QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal { width: 0; }
+    QWidget { background: transparent; }
+    QWidget:focus { outline: none; }
+    QToolTip {
+      background-color: %17; color: %1; border: 1px solid %18;
+      padding: 4px 8px;
+    }
     QCheckBox { color: %1; spacing: 8px; }
     QCheckBox::indicator {
       width: 16px; height: 16px; border: 1px solid %5;
@@ -331,9 +361,17 @@ QString ThemeEngine::buildStyleSheet() const {
     QListWidget::item { color: %1; border-radius: 6px; margin: 2px; }
     QListWidget::item:selected { background-color: %6; color: %1; }
     QListWidget::item:hover { background-color: %4; }
-  )")
-      .arg(t, bg, dim, raised, border, panel, accent, sunken, btnHover,
-           btnPressed, toolbar, panelHeader, textSecondary, textMuted);
+  )");
+  // Substitute high→low so a multi-digit token like %18 can never claim the
+  // final "%1" of a sibling token (Qt's variadic arg warns on partial sets).
+  const QString vals[19] = {t,        bg,        dim,        raised,
+                            border,   panel,     accent,     sunken,
+                            btnHover, btnPressed, toolbar,   panelHeader,
+                            textSecondary, textMuted, backdrop, chrome,
+                            chromeRaised, chromeBorder, chromeGlow};
+  for (int i = 18; i >= 0; --i)
+    qss.replace(QStringLiteral("%%1").arg(i + 1), vals[i]);
+  return qss;
 }
 
 QString ThemeEngine::glassPanelStyle(bool glassLine) const {
@@ -353,7 +391,7 @@ QString ThemeEngine::glassPanelStyle(bool glassLine) const {
 
 void ThemeEngine::apply(QApplication& app) {
   QPalette pal = app.palette();
-  pal.setColor(QPalette::Window, theme::kBackground);
+  pal.setColor(QPalette::Window, theme::kBackdrop);
   pal.setColor(QPalette::WindowText, theme::kText);
   pal.setColor(QPalette::Base, theme::kPanelSunken);
   pal.setColor(QPalette::AlternateBase, theme::kPanel);

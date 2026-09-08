@@ -13,6 +13,7 @@ class QSlider;
 namespace misuc::ui {
 
 class PlaylistGrid;
+class HintManager;
 
 // Playlist workspace (master spec §12-20, §71): a real arrangement view bound
 // to the Session. Left column = track headers; main area = timeline lanes with
@@ -64,6 +65,10 @@ public:
   void insertSampleAt(const QString& source, double startBeat, int trackRow);
   void importAudioDialog();
 
+  // Registers the icon-only toolbar with the global hint manager so hovering
+  // any tool surfaces its hint in the HintBar (§78).
+  void attachHints(HintManager* hints);
+
 signals:
   void edited();
   void selectionChanged();
@@ -79,6 +84,11 @@ private:
   misuc::project::Session& s_;
   PlaylistGrid* grid_ = nullptr;
   QSlider* zoom_ = nullptr;
+  QToolButton* selBtn_ = nullptr;
+  QToolButton* sliceBtn_ = nullptr;
+  QToolButton* snapBtn_ = nullptr;
+  QToolButton* addBtn_ = nullptr;
+  QToolButton* zoomIcon_ = nullptr;
 };
 
 } // namespace misuc::ui

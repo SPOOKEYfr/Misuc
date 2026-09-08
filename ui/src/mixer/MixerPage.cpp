@@ -59,7 +59,8 @@ MixerPage::MixerPage(Session& session, misuc::engine::AudioEngine& engine,
   scroll_ = new QScrollArea(this);
   scroll_->setWidgetResizable(true);
   scroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-  scroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+  scroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  scroll_->setMinimumHeight(200);
   stripsHost_ = new QWidget(scroll_);
   stripsHost_->setObjectName(QStringLiteral("mixerHost"));
   scroll_->setWidget(stripsHost_);

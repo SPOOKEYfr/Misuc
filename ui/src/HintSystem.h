@@ -5,7 +5,10 @@
 #include <QObject>
 #include <QString>
 #include <functional>
+#include <optional>
 #include <unordered_map>
+
+#include "branding/Icons.h"
 
 class QWidget;
 
@@ -61,6 +64,18 @@ public:
   // Registers a widget whose hint always comes from the command registry.
   void registerCommand(QWidget* widget, const QString& commandId);
 
+  // Registers an icon-only tool: the same record as registerHint, but also
+  // suppresses the native QToolTip so hints surface in the HintBar only.
+  void registerTool(QWidget* widget, const QString& name,
+                    const QString& description = QString(),
+                    const QString& shortcut = QString(),
+                    icons::IconId icon = icons::IconId::None,
+                    std::function<QString()> value = nullptr);
+  // Registers a custom-painted control (no child widgets): the resolver maps a
+  // local hit position to the hint shown under that hotspot.
+  void registerCustom(QWidget* widget,
+                      std::function<std::optional<Hint>(const QPoint&)> resolve);
+
   void setDefaultHint(Hint hint);
   void refresh();
 
@@ -68,13 +83,17 @@ protected:
   bool eventFilter(QObject* watched, QEvent* event) override;
 
 private:
-  Hint hintFor(const QWidget* widget) const;
+  Hint hintFor(const QWidget* widget, const QPoint& pos) const;
+  void showFor(QWidget* widget);
 
   HintBar* bar_;
   Hint defaultHint_;
   std::unordered_map<QWidget*, Hint> hints_;
   std::unordered_map<QWidget*, QString> commandIds_;
+  std::unordered_map<QWidget*, std::function<std::optional<Hint>(const QPoint&)>>
+      customResolvers_;
   QWidget* hovered_ = nullptr;
+  QPoint lastPos_;
 };
 
 } // namespace misuc::ui

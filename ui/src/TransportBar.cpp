@@ -10,6 +10,8 @@
 #include <misuc/engine/audio/AudioEngine.h>
 #include <misuc/engine/transport/Transport.h>
 
+#include "HintSystem.h"
+#include "branding/Icons.h"
 #include "Theme.h"
 
 namespace misuc::ui {
@@ -42,6 +44,7 @@ TransportBar::TransportBar(misuc::engine::AudioEngine& engine, QWidget* parent)
     : QWidget(parent), engine_(engine) {
   setMinimumHeight(72);
   setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+  setAttribute(Qt::WA_Hover, true);
   const misuc::engine::Transport& tr = engine_.transport();
   tempo_ = tr.tempo();
   tsNum_ = tr.timeSigNumerator();
@@ -308,6 +311,96 @@ void TransportBar::mousePressEvent(QMouseEvent* event) {
     update();
   }
   QWidget::mousePressEvent(event);
+}
+
+QString TransportBar::positionText() const {
+  return positionAtFrame(playhead_, tempo_,
+                         engine_.sampleRate() > 0 ? engine_.sampleRate() : 48000,
+                         tsNum_, tsDen_);
+}
+
+void TransportBar::attachHints(HintManager* hints) {
+  if (!hints)
+    return;
+  auto mk = [](const QString& name, const QString& desc, const QString& sc,
+               icons::IconId ic, std::function<QString()> value = nullptr) {
+    Hint h;
+    h.name = name;
+    h.description = desc;
+    h.shortcut = sc;
+    h.icon = icons::make(ic, theme::kText, 16);
+    h.value = std::move(value);
+    return h;
+  };
+  auto kind = [&]() -> std::optional<int> {
+    const QPoint pos = mapFromGlobal(QCursor::pos());
+    const QRectF rf = displayRect_;
+    if (rf.contains(QPointF(pos)))
+      return 7;
+    QRectF ref = playBtn_;
+    if (ref.isNull()) {
+      const double y = (height() - 40.0) / 2.0;
+      ref = QRectF(y, 0, width() - 2 * y, 40);
+    }
+    for (int i = 0; i < 7; ++i) {
+      if (buttonRect(ref, i).contains(QPointF(pos)))
+        return i;
+    }
+    return std::nullopt;
+  };
+  hints->registerCustom(this, [&](const QPoint& pos) -> std::optional<Hint> {
+    Q_UNUSED(pos);
+    const std::optional<int> idx = kind();
+    if (!idx)
+      return std::nullopt;
+    switch (*idx) {
+      case 0:
+        return mk(QStringLiteral("Transport: Play"),
+                  QLatin1String(playing_ ? "Pause playback" : "Start playback from the playhead"),
+                  QStringLiteral("Space"), icons::IconId::Play,
+                  [&] { return QLatin1String(playing_ ? "playing" : "stopped"); });
+      case 1:
+        return mk(QStringLiteral("Transport: Stop"),
+                  QStringLiteral("Return the playhead to the song start"),
+                  QStringLiteral("S"), icons::IconId::Stop);
+      case 2:
+        return mk(QStringLiteral("Count-In"),
+                  QStringLiteral("Play a full bar of click before recording"),
+                  QString(), icons::IconId::Metronome,
+                  [&] { return countIn_ ? QStringLiteral("on") : QStringLiteral("off"); });
+      case 3:
+        return mk(QStringLiteral("Loop"),
+                  QStringLiteral("Toggle looped playback of the section"),
+                  QString(), icons::IconId::Loop,
+                  [&] { return loopOn_ ? QStringLiteral("on") : QStringLiteral("off"); });
+      case 4:
+        return mk(QStringLiteral("Record"),
+                  QStringLiteral("Arm/disarm input recording at the playhead"),
+                  QString(), icons::IconId::Record,
+                  [&] { return recording_ ? QStringLiteral("armed") : QStringLiteral("off"); });
+      case 5:
+        return mk(QStringLiteral("Snap"),
+                  QStringLiteral("Quantize edits to the grid"),
+                  QStringLiteral("N"), icons::IconId::Snap,
+                  [&] { return snap_ ? QStringLiteral("on") : QStringLiteral("off"); });
+      case 6:
+        return mk(QStringLiteral("Playback Mode"),
+                  QStringLiteral("Switch between Song and Pattern arrangement"),
+                  QString(), icons::IconId::SongMode,
+                  [&] { return songMode_ ? QStringLiteral("song") : QStringLiteral("pattern"); });
+      case 7:
+        return mk(QStringLiteral("Transport Position"),
+                  QStringLiteral("Current musical position (bar.beat.16th.tick)"),
+                  QString(), icons::IconId::None,
+                  [&] { return positionText(); });
+      default:
+        return std::nullopt;
+    }
+  });
+  hints->setDefaultHint(
+      mk(QStringLiteral("Transport"),
+         QStringLiteral("Position readout, tempo and the transport controls"),
+         QString(), icons::IconId::None, [&] { return positionText(); }));
 }
 
 } // namespace misuc::ui

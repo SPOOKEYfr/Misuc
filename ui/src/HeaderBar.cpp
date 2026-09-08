@@ -19,6 +19,7 @@
 
 #include "branding/Logo.h"
 #include "Theme.h"
+#include "HintSystem.h"
 #include "TransportBar.h"
 #include "theme/ThemeEngine.h"
 #include "tooltip/MisucTooltip.h"
@@ -423,6 +424,56 @@ void HeaderBar::refreshLogo() {
     return;
   const QColor accent = theme::kAccent;
   navLogo_->setPixmap(logoPixmap(30, accent, theme::kAccentSoft));
+}
+
+void HeaderBar::attachHints(HintManager* hints) {
+  if (!hints)
+    return;
+
+  struct IdDesc { const char* id; const char* name; const char* desc; };
+  static const IdDesc kStripInfo[] = {
+      {"playlist", "Workspace: Playlist",
+       "Arrange audio clips and MIDI regions"},
+      {"pianoroll", "Workspace: Piano Roll",
+       "Draw and edit MIDI notes on the selected track"},
+      {"channelrack", "Workspace: Channel Rack",
+       "Step-sequencer channels, gates and levels"},
+      {"mixer", "Workspace: Mixer",
+       "Per-track gain, pan, mute, solo and meters"},
+      {"browser", "Workspace: Browser",
+       "Samples, project audio, instruments and effects"},
+      {"inspector", "Workspace: Inspector",
+       "Properties of the selected clip, note or channel"},
+  };
+  for (const auto& info : kStripInfo) {
+    const QString id = QString::fromLatin1(info.id);
+    QToolButton* b = wsButtons_.value(id);
+    if (!b)
+      continue;
+    hints->registerTool(b, QString::fromUtf8(info.name),
+                        QString::fromUtf8(info.desc), QString(),
+                        wsIconIds_.value(id));
+  }
+
+  if (navLogo_)
+    hints->registerTool(navLogo_, QStringLiteral("Misuc"),
+                        QStringLiteral("Open the project page"),
+                        QStringLiteral("Ctrl+O"), icons::IconId::App);
+  if (cpuLabel_)
+    hints->registerHint(cpuLabel_, QStringLiteral("App CPU"),
+                        QStringLiteral("Avg CPU over the polling window"));
+  if (ramLabel_)
+    hints->registerHint(ramLabel_, QStringLiteral("App RAM"),
+                        QStringLiteral("RSS memory currently resident"));
+  if (srLabel_)
+    hints->registerHint(srLabel_, QStringLiteral("Audio Engine"),
+                        QStringLiteral("Sample rate, channels and buffer size"));
+  if (latencyLabel_)
+    hints->registerHint(latencyLabel_, QStringLiteral("Latency"),
+                        QStringLiteral("Round-trip audio buffer latency"));
+  if (xrunLabel_)
+    hints->registerHint(xrunLabel_, QStringLiteral("XRuns"),
+                        QStringLiteral("Audio underruns / overruns"));
 }
 
 } // namespace misuc::ui

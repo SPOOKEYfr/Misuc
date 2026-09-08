@@ -1,14 +1,17 @@
 #pragma once
 
+#include <QLabel>
 #include <QWidget>
 
 class QTreeWidget;
 class QTreeWidgetItem;
 class QLineEdit;
-class QLabel;
 class QVBoxLayout;
+class QToolButton;
 
 namespace misuc::ui {
+
+class HintManager;
 
 // Browser workspace (master spec §26-27): category tree on the left, real file
 // listing on the right, a preview strip at the bottom. Audio files are scanned
@@ -26,9 +29,20 @@ public:
   void setInsertTarget(bool canInsertStyle);
   void refresh();
 
+  // Registers the icon-only chrome with the global hint manager.
+  void attachHints(HintManager* hints);
+
+  // Preview strip control access for the hint bar's live values.
+  QString currentPreviewName() const { return previewTitle_->text(); }
+  bool hasPreviewSelection() const {
+    return previewTitle_ && !previewTitle_->text().startsWith(
+                                QStringLiteral("Select an audio"));
+  }
+
 signals:
   void insertSample(const QString& path);
   void hint(const QString& text);
+  void previewRequested();
 
 protected:
   void populateSamples();
@@ -44,6 +58,9 @@ private:
   QVBoxLayout* previewHost_ = nullptr;
   QLabel* previewTitle_ = nullptr;
   QLabel* previewMeta_ = nullptr;
+  QToolButton* previewBtn_ = nullptr;
+  QToolButton* insertBtn_ = nullptr;
+  QLineEdit* searchBox_ = nullptr;
   QStringList sessionSources_;
 };
 

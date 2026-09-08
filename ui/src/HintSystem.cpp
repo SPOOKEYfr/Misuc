@@ -2,11 +2,14 @@
 
 #include <QEvent>
 #include <QFontMetrics>
+#include <QHoverEvent>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPainterPath>
+#include <optional>
 
 #include "Theme.h"
+#include "branding/Icons.h"
 #include "commands/MisucCommandRegistry.h"
 
 namespace misuc::ui {
@@ -192,7 +195,40 @@ void HintManager::registerCommand(QWidget* widget, const QString& commandId) {
   widget->installEventFilter(this);
 }
 
-Hint HintManager::hintFor(const QWidget* widget) const {
+void HintManager::registerTool(QWidget* widget, const QString& name,
+                               const QString& description,
+                               const QString& shortcut, icons::IconId icon,
+                               std::function<QString()> value) {
+  Hint h{name, description, shortcut, QIcon(), QString(), std::move(value)};
+  if (icon != icons::IconId::None)
+    h.icon = icons::make(icon, theme::kAccent);
+  registerHint(widget, std::move(h));
+  widget->setToolTip(QString());
+}
+
+void HintManager::registerCustom(
+    QWidget* widget, std::function<std::optional<Hint>(const QPoint&)> resolve) {
+  if (!widget)
+    return;
+  customResolvers_[widget] = std::move(resolve);
+  widget->installEventFilter(this);
+}
+
+Hint HintManager::hintFor(const QWidget* widget, const QPoint& pos) const {
+  auto itC = customResolvers_.find(const_cast<QWidget*>(widget));
+  if (itC != customResolvers_.end()) {
+    QPoint local = pos;
+    // pos arrives in the widget's own coordinate space from showFor().
+    if (itC->second) {
+      try {
+        const auto r = itC->second(local);
+        if (r)
+          return *r;
+      } catch (...) {
+        return Hint{};
+      }
+    }
+  }
   auto itId = commandIds_.find(const_cast<QWidget*>(widget));
   if (itId != commandIds_.end())
     return hintFromCommand(itId->second);
@@ -220,23 +256,48 @@ void HintManager::refresh() {
 }
 
 bool HintManager::eventFilter(QObject* watched, QEvent* event) {
+  auto widget = qobject_cast<QWidget*>(watched);
+  if (!widget || !widget->isVisible())
+    return false;
   if (event->type() == QEvent::Enter || event->type() == QEvent::HoverEnter) {
-    auto widget = qobject_cast<QWidget*>(watched);
     if (widget) {
-      const Hint h = hintFor(widget);
-      if (!h.name.isEmpty() || !h.description.isEmpty()) {
-        hovered_ = widget;
-        bar_->showHint(h);
+      hovered_ = widget;
+      showFor(widget);
+    }
+  } else if (event->type() == QEvent::MouseMove ||
+             event->type() == QEvent::HoverMove) {
+    if (widget == hovered_) {
+      const auto itC = customResolvers_.find(widget);
+      if (itC != customResolvers_.end()) {
+        QPoint local;
+        if (event->type() == QEvent::MouseMove)
+          local = static_cast<QMouseEvent*>(event)->position().toPoint();
+        else
+          local = static_cast<QHoverEvent*>(event)->position().toPoint();
+        try {
+          const auto r = itC->second(local);
+          if (r)
+            bar_->showHint(*r);
+        } catch (...) {
+        }
       }
     }
   } else if (event->type() == QEvent::Leave ||
              event->type() == QEvent::HoverLeave) {
-    if (watched == hovered_) {
+    if (widget == hovered_) {
       hovered_ = nullptr;
       bar_->showHint(defaultHint_);
     }
   }
   return QObject::eventFilter(watched, event);
+}
+
+void HintManager::showFor(QWidget* widget) {
+  const Hint h = hintFor(widget, QPoint());
+  if (!h.name.isEmpty() || !h.description.isEmpty())
+    bar_->showHint(h);
+  else
+    bar_->showHint(defaultHint_);
 }
 
 } // namespace misuc::ui

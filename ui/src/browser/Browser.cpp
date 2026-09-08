@@ -8,10 +8,10 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QPainter>
-#include <QPushButton>
 #include <QScrollArea>
 #include <QStandardPaths>
 #include <QSplitter>
+#include <QToolButton>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QSet>
@@ -20,6 +20,7 @@
 
 #include <sndfile.h>
 #include <misuc/engine/audio/WavFile.h>
+#include "HintSystem.h"
 #include "Theme.h"
 #include "branding/Icons.h"
 
@@ -72,7 +73,9 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
   cats_ = new QTreeWidget(split);
   cats_->setHeaderHidden(true);
   cats_->setFocusPolicy(Qt::NoFocus);
-  cats_->setStyleSheet(QString("background: %1;").arg(theme::kPanel.name()));
+  cats_->setStyleSheet(QString("background: %1; border-right: 1px solid %2;")
+      .arg(theme::kSurface.name(QColor::HexArgb),
+           theme::kChromeBorder.name(QColor::HexArgb)));
   split->addWidget(cats_);
 
   auto* rightCol = new QWidget(split);
@@ -82,6 +85,7 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
 
   auto* searchHeader = new QHBoxLayout;
   auto* search = new QLineEdit(rightCol);
+  searchBox_ = search;
   search->setPlaceholderText("Search samples...");
   search->setClearButtonEnabled(true);
   auto* searchIcon = new QLabel(rightCol);
@@ -97,13 +101,14 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
   files_->setDragDropMode(QAbstractItemView::DragOnly);
   files_->header()->setStretchLastSection(true);
   files_->header()->setSectionResizeMode(0, QHeaderView::Stretch);
-  files_->setStyleSheet(QString("background: %1;").arg(theme::kPanel.name()));
+  files_->setStyleSheet(QString("background: %1;").arg(theme::kSurface.name(QColor::HexArgb)));
   rcLay->addWidget(files_, 1);
 
-  // bottom preview strip
+  // bottom preview strip (matte-glass chrome)
   auto* preview = new QWidget(rightCol);
   preview->setStyleSheet(QString("background: %1; border-top: 1px solid %2;")
-      .arg(theme::kPanelRaised.name(), theme::kBorder.name()));
+      .arg(theme::kChrome.name(QColor::HexArgb),
+           theme::kChromeBorder.name(QColor::HexArgb)));
   previewHost_ = new QVBoxLayout(preview);
   previewHost_->setContentsMargins(8, 6, 8, 6);
   previewTitle_ = new QLabel("Select an audio file to preview", preview);
@@ -113,10 +118,22 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
   previewHost_->addWidget(previewTitle_);
   previewHost_->addWidget(previewMeta_);
   auto* btnRow = new QHBoxLayout;
-  auto* playBtn = new QPushButton("Preview", preview);
-  auto* insertBtn = new QPushButton("Insert", preview);
-  btnRow->addWidget(playBtn);
-  btnRow->addWidget(insertBtn);
+  previewBtn_ = new QToolButton(preview);
+  previewBtn_->setIcon(icons::make(icons::IconId::Preview, theme::kText, 16));
+  previewBtn_->setIconSize(QSize(16, 16));
+  previewBtn_->setAutoRaise(true);
+  previewBtn_->setFixedSize(28, 28);
+  previewBtn_->setCursor(Qt::PointingHandCursor);
+  previewBtn_->setFocusPolicy(Qt::NoFocus);
+  insertBtn_ = new QToolButton(preview);
+  insertBtn_->setIcon(icons::make(icons::IconId::Add, theme::kAccent, 16));
+  insertBtn_->setIconSize(QSize(16, 16));
+  insertBtn_->setAutoRaise(true);
+  insertBtn_->setFixedSize(28, 28);
+  insertBtn_->setCursor(Qt::PointingHandCursor);
+  insertBtn_->setFocusPolicy(Qt::NoFocus);
+  btnRow->addWidget(previewBtn_);
+  btnRow->addWidget(insertBtn_);
   btnRow->addStretch(1);
   previewHost_->addLayout(btnRow);
   rcLay->addWidget(preview);
@@ -156,13 +173,16 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
           [this](QTreeWidgetItem* cur) { selectFileItem(cur); });
   connect(files_, &QTreeWidget::itemDoubleClicked, this,
           [this] { onFileActivated(); });
-  connect(playBtn, &QPushButton::clicked, this, [this] {
+  connect(previewBtn_, &QToolButton::clicked, this, [this] {
     if (files_->currentItem()) {
       QString p = files_->currentItem()->data(0, Qt::UserRole).toString();
-      if (!p.isEmpty()) buildPreview(p);
+      if (!p.isEmpty()) {
+        buildPreview(p);
+        Q_EMIT previewRequested();
+      }
     }
   });
-  connect(insertBtn, &QPushButton::clicked, this,
+  connect(insertBtn_, &QToolButton::clicked, this,
           [this] {
             if (files_->currentItem()) {
               QString p = files_->currentItem()->data(0, Qt::UserRole).toString();
@@ -170,6 +190,23 @@ Browser::Browser(QWidget* parent) : QWidget(parent) {
             }
           });
   onCategoryActivated();
+}
+
+void Browser::attachHints(HintManager* hints) {
+  if (!hints)
+    return;
+  hints->registerTool(searchBox_, QStringLiteral("Search Samples"),
+                      QStringLiteral("Filter the sample list by name"), QString(), icons::IconId::Search);
+  hints->registerTool(previewBtn_, QStringLiteral("Preview Sample"),
+                      QStringLiteral("Audition the selected audio file"), QString(), icons::IconId::Preview,
+                      [this] {
+                        return hasPreviewSelection() ? currentPreviewName()
+                                                     : QStringLiteral("no selection");
+                      });
+  hints->registerTool(insertBtn_, QStringLiteral("Insert Sample"),
+                      QStringLiteral("Place the selected audio as a new clip in "
+                                     "the playlist"), QString(), icons::IconId::Add,
+                      [this] { return QString(); });
 }
 
 void Browser::onCategoryActivated() {

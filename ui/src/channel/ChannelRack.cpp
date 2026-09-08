@@ -7,11 +7,17 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QLabel>
 #include <QMenu>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QSettings>
 #include <QStandardItemModel>
+#include <QStyledItemDelegate>
+#include <QToolButton>
+
+#include "HintSystem.h"
+#include "Theme.h"
 #include <QStyledItemDelegate>
 #include <QTableView>
 #include <QToolButton>
@@ -162,6 +168,53 @@ ChannelRack::ChannelRack(QWidget* parent) : QWidget(parent) {
   lay->setContentsMargins(0, 0, 0, 0);
   lay->setSpacing(0);
 
+  // ── icon-only chrome header (matte glass, §36-38/§66-68)
+  auto* chrome = new QWidget(this);
+  chrome->setObjectName(QStringLiteral("rackChrome"));
+  chrome->setFixedHeight(34);
+  chrome->setStyleSheet(
+      QStringLiteral("QWidget#rackChrome { background: %1; "
+                     "border-bottom: 1px solid %2; }")
+          .arg(theme::kChrome.name(QColor::HexArgb),
+               theme::kChromeBorder.name(QColor::HexArgb)));
+  auto* cl = new QHBoxLayout(chrome);
+  cl->setContentsMargins(10, 3, 10, 3);
+  cl->setSpacing(4);
+
+  auto mkChromeBtn = [&](icons::IconId id, const QString& tip) {
+    auto* b = new QToolButton(chrome);
+    b->setIcon(icons::make(id, theme::kTextDim, 16));
+    b->setIconSize(QSize(16, 16));
+    b->setAutoRaise(true);
+    b->setFixedSize(26, 26);
+    b->setCursor(Qt::PointingHandCursor);
+    b->setFocusPolicy(Qt::NoFocus);
+    b->setToolTip(tip);
+    chromeButtons_.push_back(b);
+    return b;
+  };
+
+  auto* title = new QLabel(QStringLiteral("CHANNEL RACK"), chrome);
+  title->setStyleSheet(QStringLiteral("color: %1; font-size: 9px; "
+                                      "font-weight: 800; letter-spacing: 2px;")
+                           .arg(theme::kTextMuted.name()));
+  cl->addWidget(title);
+  cl->addStretch(1);
+
+  auto* prevBtn = mkChromeBtn(icons::IconId::Preview, "Preview sound (row)");
+  auto* addBtn = mkChromeBtn(icons::IconId::Add, "Add channel");
+  auto* dupBtn = mkChromeBtn(icons::IconId::Duplicate, "Duplicate channel");
+  auto* delBtn = mkChromeBtn(icons::IconId::Remove, "Remove channel");
+  auto* resetBtn = mkChromeBtn(icons::IconId::Undo, "Reset to starter kit");
+  cl->addWidget(prevBtn);
+  cl->addSpacing(4);
+  cl->addWidget(addBtn);
+  cl->addWidget(dupBtn);
+  cl->addWidget(delBtn);
+  cl->addSpacing(4);
+  cl->addWidget(resetBtn);
+  lay->addWidget(chrome);
+
   view_ = new QTableView(this);
   view_->setSelectionBehavior(QAbstractItemView::SelectItems);
   view_->setSelectionMode(QAbstractItemView::SingleSelection);
@@ -192,6 +245,84 @@ ChannelRack::ChannelRack(QWidget* parent) : QWidget(parent) {
     setCurrent(i.row());
     Q_EMIT channelSelected(i.row());
   });
+
+  // Chrome actions. Need to keep chromeButtons_ pointers local: buttons are
+  // [preview, add, duplicate, remove, reset] in creation order.
+  connect(chromeButtons_[0], &QToolButton::clicked, this,
+          &ChannelRack::previewCurrent);
+  connect(chromeButtons_[1], &QToolButton::clicked, this,
+          [this](bool) { addChannel(); });
+  connect(chromeButtons_[2], &QToolButton::clicked, this,
+          &ChannelRack::duplicateCurrent);
+  connect(chromeButtons_[3], &QToolButton::clicked, this,
+          &ChannelRack::removeCurrent);
+  connect(chromeButtons_[4], &QToolButton::clicked, this,
+          &ChannelRack::resetToDefaults);
+
+  view_->setStyleSheet(
+      QStringLiteral(
+          "QTableView { background: %1; alternate-background-color: %2; "
+          "border: none; gridline-color: %3; selection-background-color: %4; "
+          "selection-color: %5; color: %6; } "
+          "QHeaderView::section { background: %7; color: %8; border: none; "
+          "border-bottom: 1px solid %9; padding: 3px 4px; font-size: 9px; "
+          "font-weight: 600; }")
+          .arg(theme::kSurface.name(QColor::HexArgb),
+               theme::kPanel.name(QColor::HexArgb),
+               theme::kChromeBorder.name(QColor::HexArgb),
+               theme::kAccentSoft.name(), theme::kAccentActive.name(),
+               theme::kText.name(), theme::kChromeRaised.name(QColor::HexArgb),
+               theme::kTextDim.name(),
+               theme::kChromeBorder.name(QColor::HexArgb)));
+}
+
+double ChannelRack::previewFreq(int row) const {
+  if (row >= 0 && row < 5)
+    return previewPitch_[row];
+  return 220.0;
+}
+
+QString ChannelRack::channelName(int row) const {
+  if (row < 0 || row >= channels_.size())
+    return QString();
+  return channels_[row].name;
+}
+
+void ChannelRack::previewCurrent() {
+  if (!hasSelection())
+    return;
+  Q_EMIT previewRequested(current_);
+}
+
+void ChannelRack::resetToDefaults() {
+  restoreDefaults();
+  rebuildTable();
+  Q_EMIT edited();
+}
+
+void ChannelRack::attachHints(HintManager* hints) {
+  if (!hints)
+    return;
+  hints->registerTool(chromeButtons_[0], QStringLiteral("Preview Channel"),
+                      QStringLiteral("Audition the selected channel's sound "
+                                     "through the engine voice"), QString(), icons::IconId::Preview,
+                      [this] {
+                        if (!hasSelection())
+                          return QStringLiteral("no selection");
+                        return QStringLiteral("%1 · %2 Hz")
+                            .arg(channelName(current_))
+                            .arg(previewFreq(current_), 0, 'f', 0);
+                      });
+  hints->registerTool(chromeButtons_[1], QStringLiteral("Add Channel"),
+                      QStringLiteral("Append a new step-sequencer channel"), QString(), icons::IconId::Add);
+  hints->registerTool(chromeButtons_[2], QStringLiteral("Duplicate Channel"),
+                      QStringLiteral("Duplicate the selected channel with its "
+                                     "steps and levels"), QString(), icons::IconId::Duplicate);
+  hints->registerTool(chromeButtons_[3], QStringLiteral("Remove Channel"),
+                      QStringLiteral("Delete the selected channel"), QString(), icons::IconId::Remove);
+  hints->registerTool(chromeButtons_[4], QStringLiteral("Reset to Starter Kit"),
+                      QStringLiteral("Restore the Kick/Snare/Hi-Hat/Bass/Sampler "
+                                     "starter lineup"), QString(), icons::IconId::Undo);
 }
 
 void ChannelRack::restoreDefaults() {

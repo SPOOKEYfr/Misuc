@@ -18,6 +18,9 @@
 #include <QSlider>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+
+#include "HintSystem.h"
+#include "Theme.h"
 #include <QFileDialog>
 #include <QMimeData>
 #include <QLabel>
@@ -651,13 +654,14 @@ Playlist::Playlist(misuc::project::Session& session, QWidget* parent)
   lay->setContentsMargins(0, 0, 0, 0);
   lay->setSpacing(0);
 
-  // ── toolbar
+  // ── toolbar (icon-only matte-glass chrome, §36-38/§66-68)
   auto* tb = new QWidget(this);
   tb->setFixedHeight(36);
   tb->setStyleSheet(QString("background: %1; border-bottom: 1px solid %2;")
-      .arg(theme::kPanelHeader.name(), theme::kGridStrong.name()));
+      .arg(theme::kChrome.name(QColor::HexArgb),
+           theme::kChromeBorder.name(QColor::HexArgb)));
   auto* tbLay = new QHBoxLayout(tb);
-  tbLay->setContentsMargins(8, 4, 8, 4);
+  tbLay->setContentsMargins(10, 4, 10, 4);
   tbLay->setSpacing(4);
 
   auto mkBtn = [&](icons::IconId id, const QString& tip, QKeySequence sc) {
@@ -669,30 +673,40 @@ Playlist::Playlist(misuc::project::Session& session, QWidget* parent)
     b->setAutoRaise(true);
     b->setFixedSize(28,28);
     b->setShortcut(sc);
+    b->setCursor(Qt::PointingHandCursor);
+    b->setFocusPolicy(Qt::NoFocus);
     return b;
   };
 
-  auto* selBtn  = mkBtn(icons::IconId::Select, "Select (V)", QKeySequence(Qt::Key_V));
-  auto* sliceBtn= mkBtn(icons::IconId::Slice,  "Slice (C)",  QKeySequence(Qt::Key_C));
-  auto* snapBtn = mkBtn(icons::IconId::Snap,   "Snap (N)",   QKeySequence(Qt::Key_N));
-  auto* addBtn  = mkBtn(icons::IconId::Add,    "Import Audio",QKeySequence(Qt::CTRL | Qt::Key_I));
-  tbLay->addWidget(selBtn); tbLay->addWidget(sliceBtn); tbLay->addSpacing(8);
-  tbLay->addWidget(snapBtn); tbLay->addSpacing(8);
-  tbLay->addWidget(addBtn); tbLay->addStretch(1);
+  selBtn_  = mkBtn(icons::IconId::Select, "Select (V)", QKeySequence(Qt::Key_V));
+  sliceBtn_= mkBtn(icons::IconId::Slice,  "Slice (C)",  QKeySequence(Qt::Key_C));
+  snapBtn_ = mkBtn(icons::IconId::Snap,   "Snap (N)",   QKeySequence(Qt::Key_N));
+  addBtn_  = mkBtn(icons::IconId::Add,    "Import Audio",QKeySequence(Qt::CTRL | Qt::Key_I));
+  tbLay->addWidget(selBtn_); tbLay->addWidget(sliceBtn_); tbLay->addSpacing(8);
+  tbLay->addWidget(snapBtn_); tbLay->addSpacing(8);
+  tbLay->addWidget(addBtn_); tbLay->addStretch(1);
 
   zoom_ = new QSlider(Qt::Horizontal, tb);
   zoom_->setRange(4, 128);
   zoom_->setValue(24);
   zoom_->setFixedWidth(120);
   zoom_->setToolTip("Zoom (Ctrl+Wheel)");
-  tbLay->addWidget(new QLabel("Zoom", tb));
+  zoom_->setFocusPolicy(Qt::NoFocus);
+  zoomIcon_ = new QToolButton(tb);
+  zoomIcon_->setIcon(icons::make(icons::IconId::ZoomIn, theme::kTextDim, 15));
+  zoomIcon_->setIconSize(QSize(15, 15));
+  zoomIcon_->setAutoRaise(true);
+  zoomIcon_->setFixedSize(24, 24);
+  zoomIcon_->setCursor(Qt::PointingHandCursor);
+  zoomIcon_->setFocusPolicy(Qt::NoFocus);
+  tbLay->addWidget(zoomIcon_);
   tbLay->addWidget(zoom_);
   lay->addWidget(tb);
 
-  connect(selBtn, &QToolButton::toggled, this, [=](bool on){ if(on) { sliceBtn->setChecked(false); } });
-  connect(sliceBtn, &QToolButton::toggled, this, [=](bool on){ if(on) { selBtn->setChecked(false); } });
-  connect(snapBtn, &QToolButton::toggled, this, &Playlist::setSnap);
-  connect(addBtn,  &QToolButton::clicked, this, &Playlist::importAudioDialog);
+  connect(selBtn_, &QToolButton::toggled, this, [=](bool on){ if(on) { sliceBtn_->setChecked(false); } });
+  connect(sliceBtn_, &QToolButton::toggled, this, [=](bool on){ if(on) { selBtn_->setChecked(false); } });
+  connect(snapBtn_, &QToolButton::toggled, this, &Playlist::setSnap);
+  connect(addBtn_,  &QToolButton::clicked, this, &Playlist::importAudioDialog);
   connect(zoom_, &QSlider::valueChanged, this, [this](int v){ applyZoom(v); });
 
   // ── grid inside scroll area
@@ -744,6 +758,27 @@ void Playlist::selectTrack(const QString& id) {
 }
 void Playlist::clearSelection() {
   grid_->selRow_ = -1; grid_->selClip_ = -1; grid_->selMidi_ = false; grid_->update();
+}
+
+void Playlist::attachHints(HintManager* hints) {
+  if (!hints)
+    return;
+  hints->registerTool(selBtn_, QStringLiteral("Tool: Select"),
+                      QStringLiteral("Select and move clips and MIDI regions"), QKeySequence(Qt::Key_V).toString(QKeySequence::NativeText), icons::IconId::Select);
+  hints->registerTool(sliceBtn_, QStringLiteral("Tool: Slice"),
+                      QStringLiteral("Split the clip under the playhead into two"), QKeySequence(Qt::Key_C).toString(QKeySequence::NativeText), icons::IconId::Slice);
+  hints->registerTool(snapBtn_, QStringLiteral("Snap to Grid"),
+                      QStringLiteral("Quantize clip moves and resizes to the beat grid"), QKeySequence(Qt::Key_N).toString(QKeySequence::NativeText), icons::IconId::Snap, [this] {
+                        return grid_->snapOn_ ? QStringLiteral("on") : QStringLiteral("off");
+                      });
+  hints->registerTool(addBtn_, QStringLiteral("Import Audio"),
+                      QStringLiteral("Import a sample into the selected track as a new clip"), QKeySequence(QStringLiteral("Ctrl+I")).toString(QKeySequence::NativeText), icons::IconId::Add);
+  hints->registerTool(zoomIcon_, QStringLiteral("Zoom"),
+                      QStringLiteral("Horizontal zoom of the timeline"), QString(), icons::IconId::ZoomIn);
+  hints->registerTool(zoom_, QStringLiteral("Zoom"),
+                      QStringLiteral("Horizontal zoom of the timeline (Ctrl+Wheel also works)"), QString(), icons::IconId::ZoomIn, [this] {
+                        return QStringLiteral("%1 px/beat").arg(grid_->pxPerBeat_, 0, 'f', 1);
+                      });
 }
 QString Playlist::selectedTrackId() const { return grid_->trackIdAt(grid_->selRow_); }
 int Playlist::selectedClipRow() const { return grid_->selRow_; }

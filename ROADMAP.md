@@ -499,6 +499,28 @@ engine code changed.
   selection — workspace intro, track, audio clip, MIDI region, or note
   properties — driven live by Playlist selection. Read-only by design; edits
   happen in their owning workspaces.
+- **Phase 14.2 — visual redesign + live Inspector (done):**
+  - Matte-glass chrome: `theme::kChrome`/`kChromeRaised`/`kChromeBorder`
+    tokens (Theme.h) + ThemeEngine QSS rewrite (explicit high→low placeholder
+    substitution; zero `QString::arg` warnings). Global transparent `QWidget`
+    background with explicit per-view QSS.
+  - Icon-only chrome: Playlist toolbar (Select/Slice/Snap/Add + ZoomIn + zoom
+    slider), Browser Preview/Insert, Channel Rack header (Preview/Add/
+    Duplicate/Remove/Reset).
+  - Fully developed hover HintBar (`HintManager::registerTool` /
+    `registerCustom`) across Playlist, Channel Rack, Browser, HeaderBar strip +
+    status labels, and the custom TransportBar (position-aware resolver, live
+    position readout via QCursor::pos() over painted button rects).
+  - **Inspector is now a live Session-backed editor**: editable track
+    name/mute/solo/gain/pan and clip name/gain/trim push mutations straight
+    into the Session (undo-tracked, engine score refreshed). Verified by
+    `qatool inspect`, 5/5.
+  - QA tooling recreated at /tmp/opencode (qatool: `audit` / `snap` / `behave`
+    / `inspect`; verify_pixels.py PNG verifier). Layout auditor: **0 issues /
+    294 widgets** at 1280x800, 1440x900, 1920x1080; behave 9/9; snapshots
+    pixel-verified (charcoal backdrop, violet-accent chrome band).
+  - Packaging closed: 512px hicolor + bundled icons shipped; install staged +
+    `.deb` regenerated and contents-verified.
 - **Header strip → workshop wiring**: the global header's workspace strip now
   communicates with the WorkspaceManager (toggle ↔ active highlight), the
   snap/mode buttons drive the Playlist, F5/F6/F7/F8/F9 + Ctrl+Shift+I toggle

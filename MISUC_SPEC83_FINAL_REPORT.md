@@ -58,9 +58,12 @@ desktop-file-validate rc=0.
                                                       amd64.deb); dpkg-deb info
                                                       OK; desktop-file-validate
                                                       rc=0; StartupWMClass added.
-14  Harness updated (violet caret, new-way    DONE     /tmp/opencode/prbehave —
-    checks; 213+ green)                               workspace suite added,
-                                                      ALL OK x2.
+14  Harness updated (violet caret, new-way    DONE     /tmp/opencode/qatool
+    checks; 213+ green)                               replaces the wiped
+                                                      prbehave — audit (0 issues
+                                                      / 294 widgets x3 res),
+                                                      behave 9/9, inspect 5/5,
+                                                      snap pixel-verified.
 15  Full build, engine tests, harness,        DONE     cleanned build; 54145/0;
     smoke, multi-resolution/DPI launches              harness ALL OK; offscreen
                                                       smoke rc=124; renders at
@@ -120,9 +123,11 @@ Done (verified):
       (StartupWMClass=misuc_app).
 
 Honest limits (accepted, documented; NOT hidden):
-  [~] Inspector is a READ-ONLY mirror — its edit requests are not wired;
-      edits happen in owning workspaces (deliberate, recorded in
-      ARCHITECTURE.md Phase 14).
+  [x] Inspector is now a LIVE Session-backed editor: track name/mute/solo/
+      gain/pan and clip name/gain/trim edit straight into the Session
+      (undo-tracked, engine score refreshed); verified by `qatool inspect`.
+      Read-only rows remain for start/length/notes metadata the owning
+      workspace edits (playlist drag, piano-roll notes).
   [~] Browser preview does NOT auto-audition: Preview decodes + displays the
       waveform and metadata; audio playback of a drop requires placing the
       sample on the Playlist (which is a real voice).

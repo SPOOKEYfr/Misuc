@@ -342,10 +342,14 @@ workspaces, all owned by one object:
   via `misuc::audio::readAudioFile`, and two ways to insert a sample into the
   Playlist (drag-and-drop and Insert). Plugin category entries are
   informational text rows only — no fake DSP.
-- **`ui/src/inspector/Inspector.{h,cpp}`** — right dock. Read-only context
-  panel (workspace intro / track / audio clip / MIDI region / note) driven by
-  `Playlist::selectionSummary()`; owners mutate their own data, so the
-  Inspector is a faithful mirror by design.
+- **`ui/src/inspector/Inspector.{h,cpp}`** — right dock. Live context panel
+  (workspace intro / track / audio clip / MIDI region / note) driven by
+  `Playlist::selectionSummary()`. Editable rows (track name/mute/solo/gain/pan,
+  clip name/gain/trim) emit `editRequest`, which `MainWindow::onInspectorEdit`
+  applies to `Session::findTrack`/clips and pushes through `onSessionEdited()`,
+  so edits are undo-tracked and reach the engine score, mixer, and playlist.
+  Numeric/metadata rows that owning workspaces edit (start/length, notes)
+  stay read-only mirrors.
 - **Commands** (`ui/src/commands/MisucCommandRegistry`) and **tooltips**
   (`ui/src/tooltip/MisucTooltip`) stay the single source of truth for menus,
   header buttons, and hint text; `buildCommands()` in MainWindow registers

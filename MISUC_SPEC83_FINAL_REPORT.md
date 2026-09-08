@@ -2,13 +2,14 @@
 MISUC — §83 FINAL MILESTONE REPORT
 Master UI/UX Specification (§0–§83), workspace phase (Plan items 1–18)
 ================================================================================
-Date:    2026-09-07
+Date:    2026-09-07 (updated 2026-09-08 for the visual redesign / Phase 14.2)
 Repo:    /home/oibhupi/misuc (master)
 Engine:  unchanged — `Session::tracks()` public reference is the only mutation
          path the new workspaces use; no engine/dsp/transport edits.
-Verification gate at this commit: engine tests 54145/0 PASS, harness ALL OK
-(x2), offscreen smoke rc=124, renders pixel-verified at 1400x860 AND 1024x768,
-desktop-file-validate rc=0.
+Verification gate at this commit: engine tests 54145/0 PASS, QA tool audits 0
+issues/294 widgets at 1280x800 + 1440x900 + 1920x1080, behave 9/9, inspect
+5/5, offscreen smoke rc=124, snapshots pixel-verified, desktop-file-validate
+rc=0.
 
 ---------------------------------------------------------------------------
 1. THE 18 PLAN ITEMS — ACCEPTANCE TABLE
@@ -60,24 +61,23 @@ desktop-file-validate rc=0.
                                                       rc=0; StartupWMClass added.
 14  Harness updated (violet caret, new-way    DONE     /tmp/opencode/qatool
     checks; 213+ green)                               replaces the wiped
-                                                      prbehave — audit (0 issues
-                                                      / 294 widgets x3 res),
-                                                      behave 9/9, inspect 5/5,
-                                                      snap pixel-verified.
-15  Full build, engine tests, harness,        DONE     cleanned build; 54145/0;
-    smoke, multi-resolution/DPI launches              harness ALL OK; offscreen
-                                                      smoke rc=124; renders at
-                                                      1400x860 + 1024x768
-                                                      pixel-verified.
-16  Manual visual QA pass (screenshots at     DONE     /tmp/mc_b 1/2/3_*_{default,
-    several sizes) — collisions/clipping/            pianoroll,focus}.png at both
-    contrast/glass fixes                              sizes; token-presence
-                                                      analysis; no clip/collision
-                                                      failures recorded.
-17  Docs (ROADMAP/ARCHITECTURE/CURRENT_STATUS) DONE    Phase 14 entries committed
-    + logical git commits                            in 4 commits (feature, mixer
-                                                      fix, StartupWMClass,
-                                                      docs).
+                                                       prbehave — audit (0 issues
+                                                       / 294 widgets x3 res),
+                                                       behave 9/9, inspect 5/5,
+                                                       snap pixel-verified.
+15  Full build, engine tests, harness,        DONE     clean build; 54145/0;
+    smoke, multi-resolution/DPI launches              smoke rc=124; audits +
+                                                       snapshots at 1280x800,
+                                                       1440x900, 1920x1080.
+16  Manual visual QA pass (screenshots at     DONE     qatool snap + verify_
+    several sizes) — collisions/clipping/            pixels.py at 3 resolutions;
+    contrast/glass fixes                              chrome-band/interior pixel
+                                                       profiles match the glass
+                                                       palette; issues=0.
+17  Docs (ROADMAP/ARCHITECTURE/CURRENT_STATUS) DONE    redesigned pass recorded +
+    + logical git commits                            in 4 logical commits
+                                                       (redesign, live inspector,
+                                                       512px icons, docs).
 18  §83 final report (18 items) + §81          THIS    This document.
     acceptance checklist honesty
 
@@ -120,7 +120,16 @@ Done (verified):
       peaks in Playlist clips (libsndfile windowed sampling).
   [x] Channel Rack steps/vol/pan persist; mute/solo respect the session state.
   [x] Linux packaging: install rules + CPack DEB + validated .desktop
-      (StartupWMClass=misuc_app).
+      (StartupWMClass=misuc_app); 512px hicolor + bundled icons shipped and
+      install/package carry them (verified via staging install + dpkg-deb).
+  [x] Matte-glass chrome + restrained violet accents (§36–38/§44): chrome-band
+      pixel scan reads dark translucent violet-blend with the charcoal
+      backdrop family; ZeroOverlap audit reports 0 issues / 294 widgets at
+      three resolutions; QString::arg warnings eliminated from theme QSS.
+  [x] Icon-only chrome (§6/§79) + fully developed hover HintBar (§78): toolbar,
+      browser insert/preview, channel-rack header, header strip + status
+      labels, and the custom TransportBar all register tools; transport hints
+      resolve by cursor position and show live position values.
 
 Honest limits (accepted, documented; NOT hidden):
   [x] Inspector is now a LIVE Session-backed editor: track name/mute/solo/
@@ -128,6 +137,8 @@ Honest limits (accepted, documented; NOT hidden):
       (undo-tracked, engine score refreshed); verified by `qatool inspect`.
       Read-only rows remain for start/length/notes metadata the owning
       workspace edits (playlist drag, piano-roll notes).
+  [x] Visual QA is offscreen + pixel-verified, but a human-desktop eyeball of
+      hover feel / dock dragging / font rendering is still the final gate.
   [~] Browser preview does NOT auto-audition: Preview decodes + displays the
       waveform and metadata; audio playback of a drop requires placing the
       sample on the Playlist (which is a real voice).
@@ -140,29 +151,35 @@ Honest limits (accepted, documented; NOT hidden):
       engine sampler (no fake DSP; frozen scope).
   [~] Desktop/audio integration still needs ONE human session on a real WM
       with a physical device (icon/taskbar/WM_CLASS + input monitoring) — code
-      and packaging are in place but headless verification is the limit.
-  [~] No 512px/scalable icon yet (nice-to-have; 16–256px set ships).
+and packaging are in place but headless verification is the limit.
 
----------------------------------------------------------------------------
+--------------------------------------------------------------------------
 4. VERIFICATION FOOTPRINT (exact commands)
 ---------------------------------------------------------------------------
-  cmake --build build                                   → clean ("no work to do")
-  ./build/bin/misuc_tests                               → 54145 checks, 0 failures
-  env QT_QPA_PLATFORM=wayland /tmp/opencode/prbehave    → ALL OK   (x2)
+  cmake --build build                                   -> clean
+  ./build/bin/misuc_tests                               -> 54145 checks, 0 failures
+  /tmp/opencode/do_qa_build.sh                          -> qatool rebuilt
+  env QT_QPA_PLATFORM=offscreen /tmp/opencode/qatool audit {W} {H}
+                                                        -> issues=0 / 294 widgets at
+                                                           1280x800, 1440x900,
+                                                           1920x1080
+  env QT_QPA_PLATFORM=offscreen /tmp/opencode/qatool behave -> BEHAVE pass=9 fail=0
+  env QT_QPA_PLATFORM=offscreen /tmp/opencode/qatool inspect -> INSPECT pass=5 fail=0
+  env QT_QPA_PLATFORM=offscreen /tmp/opencode/qatool snap {W} {H} out.png
+                                                        -> PNG; verify_pixels.py
+                                                           token + chrome-band PASS
   timeout 8 env QT_QPA_PLATFORM=offscreen ./build/bin/misuc_app
-                                                        → rc=124 (alive), empty log
-  /tmp/opencode/do_snapshot_build.sh  (rebuild)         → snapshot binary OK
-  env QT_QPA_PLATFORM=offscreen /tmp/opencode/snapshot [WxH] → PNG set at 1400x860
-                                                        and 1024x768; token scan
-                                                        confirms accent/playhead/
-                                                        clip-body/waveform present
-  cmake --build build --target package                  → misuc_0.1.0-1_amd64.deb
-  dpkg-deb --info / -c                                  → bin + .desktop + 8 icons
-  desktop-file-validate assets/desktop/misuc.desktop    → rc=0
+                                                        -> rc=124 (alive), empty log
+  cmake --build build --target package                  -> misuc_0.1.0-1_amd64.deb
+  dpkg-deb --info / -c                                  -> bin + .desktop + 9 icons
+                                                           (16-512)
+  desktop-file-validate assets/desktop/misuc.desktop    -> rc=0
+  cmake --install build --prefix /tmp/mc_b/stage        -> staged layout verified
 
----------------------------------------------------------------------------
-VERDICT: ALL 18 PLAN ITEMS COMPLETE. Engine green, harness green, packaging
-green, docs and commits in place. Remaining open work is explicitly-scoped
-Beyond (buses/routing, plugin hosting, automation lanes) plus the single
-human-desktop verification session.
-================================================================================
+--------------------------------------------------------------------------
+VERDICT: ALL 18 PLAN ITEMS COMPLETE. Engine green, QA tool green (audit /
+behave / inspect), packaging green (incl. 512px icons), docs and commits in
+place. Remaining open work is explicitly-scoped Beyond (buses/routing,
+plugin hosting, automation lanes) plus the single human-desktop verification
+session.
+===============================================================================

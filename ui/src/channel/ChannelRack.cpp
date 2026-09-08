@@ -12,6 +12,7 @@
 #include <QMouseEvent>
 #include <QPainter>
 #include <QSettings>
+#include <QSlider>
 #include <QStandardItemModel>
 #include <QStyledItemDelegate>
 #include <QToolButton>
@@ -46,7 +47,7 @@ public:
     ChannelRack::Channel& ch = (*channels)[row];
 
     if (col >= stepBase && col < stepBase + kStepCount) {
-      bool on = ch.steps[col - stepBase];
+      bool on = ch.steps[rack->pattern()][col - stepBase];
       p->fillRect(opt.rect, theme::kPanelSunken);
       QRectF cell(opt.rect.x() + 1.5, opt.rect.y() + 1.5,
                   opt.rect.width() - 3, opt.rect.height() - 3);
@@ -56,12 +57,21 @@ public:
         p->drawRoundedRect(cell, 3, 3);
       } else {
         p->setBrush(theme::kGridRow);
-        p->setPen(QColor(0,0,0,0));
+        p->setPen(QColor(0, 0, 0, 0));
         p->drawRoundedRect(cell, 3, 3);
+      }
+      // 16-step grouping: a soft divider after every 4 steps.
+      int stepIn = col - stepBase;
+      if (stepIn > 0 && stepIn % 4 == 0) {
+        p->setPen(QPen(QColor(theme::kChromeBorder.red(),
+                              theme::kChromeBorder.green(),
+                              theme::kChromeBorder.blue(), 90),
+                       1));
+        p->drawLine(opt.rect.topLeft(), opt.rect.bottomLeft());
       }
       if (opt.state.testFlag(QStyle::State_Selected)) {
         p->setPen(theme::kAccent);
-        p->drawRect(opt.rect.adjusted(0,0,-1,-1));
+        p->drawRect(opt.rect.adjusted(0, 0, -1, -1));
       }
       return;
     }
@@ -81,7 +91,7 @@ public:
       // mute
       auto r = opt.rect.adjusted(2,3,-2,-3);
       p->setPen(Qt::NoPen);
-      p->setBrush(ch.muted ? QColor(0xff,0x5c,0x5c) : theme::kGridRow);
+      p->setBrush(ch.muted ? theme::kDangerSoft : theme::kGridRow);
       p->drawRoundedRect(r, 4, 4);
       p->setPen(Qt::NoPen);
       p->setBrush(ch.muted ? theme::kDanger : theme::kTextFaint);
@@ -91,7 +101,7 @@ public:
     if (col == 2) {
       auto r = opt.rect.adjusted(2,3,-2,-3);
       p->setPen(Qt::NoPen);
-      p->setBrush(ch.solo ? QColor(0xff,0xb4,0x54) : theme::kGridRow);
+      p->setBrush(ch.solo ? theme::kAccent : theme::kGridRow);
       p->drawRoundedRect(r, 4, 4);
       p->setPen(QColor(0,0,0,150));
       QFont sf = p->font(); sf.setBold(true); sf.setPixelSize(11); p->setFont(sf);
@@ -137,7 +147,8 @@ public:
       return QStyledItemDelegate::editorEvent(ev, model, opt, index);
     if (index.column() >= stepBase && index.column() < stepBase + kStepCount) {
       ChannelRack::Channel& ch = (*channels)[index.row()];
-      ch.steps[index.column() - stepBase] = !ch.steps[index.column() - stepBase];
+      QVector<bool>& bank = ch.steps[rack->pattern()];
+      bank[index.column() - stepBase] = !bank[index.column() - stepBase];
       model->dataChanged(index, index);
       Q_EMIT rack->edited();
       return true;
@@ -199,6 +210,48 @@ ChannelRack::ChannelRack(QWidget* parent) : QWidget(parent) {
                                       "font-weight: 800; letter-spacing: 2px;")
                            .arg(theme::kTextMuted.name()));
   cl->addWidget(title);
+
+  // ── pattern selector: four 16-step banks, icon-first numbered toggles.
+  for (int i = 0; i < kPatternCount; ++i) {
+    auto* b = new QToolButton(chrome);
+    b->setText(QString::number(i + 1));
+    b->setCheckable(true);
+    b->setChecked(i == 0);
+    b->setAutoRaise(true);
+    b->setFixedSize(24, 24);
+    b->setCursor(Qt::PointingHandCursor);
+    b->setFocusPolicy(Qt::NoFocus);
+    b->setStyleSheet(
+        QStringLiteral("QToolButton { color: %1; font-size: 10px; "
+                       "font-weight: 700; border: 1px solid %2; "
+                       "border-radius: 5px; background: %3; } "
+                       "QToolButton:checked { color: %4; border-color: %5; "
+                       "background: %6; }")
+            .arg(theme::kTextDim.name(), theme::kChromeBorder.name(),
+                 theme::kChromeRaised.name(QColor::HexArgb),
+                 theme::kAccent.name(), theme::kAccent.name(),
+                 theme::kAccentSoft.name()));
+    patternButtons_.push_back(b);
+    cl->addWidget(b);
+    const int bank = i;
+    connect(b, &QToolButton::clicked, this,
+            [this, bank](bool) { setPattern(bank); });
+  }
+
+  cl->addSpacing(6);
+
+  // ── swing control (0..66%): groove amount for the active pattern bank.
+  swingSlider_ = new QSlider(Qt::Horizontal, chrome);
+  swingSlider_->setRange(0, kMaxSwing);
+  swingSlider_->setSingleStep(1);
+  swingSlider_->setFixedWidth(92);
+  swingSlider_->setFixedHeight(24);
+  swingSlider_->setFocusPolicy(Qt::NoFocus);
+  swingSlider_->setCursor(Qt::PointingHandCursor);
+  connect(swingSlider_, &QSlider::valueChanged, this,
+          [this](int v) { setSwing(v); });
+  cl->addWidget(swingSlider_);
+
   cl->addStretch(1);
 
   auto* prevBtn = mkChromeBtn(icons::IconId::Preview, "Preview sound (row)");
@@ -240,6 +293,9 @@ ChannelRack::ChannelRack(QWidget* parent) : QWidget(parent) {
   loadPersisted();
   if (channels_.isEmpty()) restoreDefaults();
   rebuildTable();
+  if (swingSlider_) swingSlider_->setValue(swing_);
+  for (int i = 0; i < patternButtons_.size(); ++i)
+    patternButtons_[i]->setChecked(i == pattern_);
 
   connect(view_, &QTableView::clicked, this, [this](const QModelIndex& i) {
     setCurrent(i.row());
@@ -323,6 +379,27 @@ void ChannelRack::attachHints(HintManager* hints) {
   hints->registerTool(chromeButtons_[4], QStringLiteral("Reset to Starter Kit"),
                       QStringLiteral("Restore the Kick/Snare/Hi-Hat/Bass/Sampler "
                                      "starter lineup"), QString(), icons::IconId::Undo);
+  for (int i = 0; i < patternButtons_.size(); ++i) {
+    const int bank = i;
+    hints->registerTool(patternButtons_[i],
+                        QStringLiteral("Pattern %1").arg(bank + 1),
+                        QStringLiteral("Switch the step lanes to 16-step group %1 "
+                                       "(persisted per pattern)").arg(bank + 1),
+                        QString(), icons::IconId::Patterns,
+                        [this, bank] {
+                          return pattern_ == bank ? QStringLiteral("active")
+                                                  : QString();
+                        });
+  }
+  if (swingSlider_)
+    hints->registerHint(swingSlider_, QStringLiteral("Swing"),
+                        QStringLiteral("Groove swing for the step lanes, stored "
+                                       "per session (0–66%). Drives the "
+                                       "pattern-playback timing the frozen "
+                                       "audio pipeline will realise on unfreeze"),
+                        QString(), [this] {
+                          return QStringLiteral("%1%").arg(swing_);
+                        });
 }
 
 void ChannelRack::restoreDefaults() {
@@ -340,11 +417,30 @@ void ChannelRack::restoreDefaults() {
     c.name = QString::fromLatin1(s.n);
     c.volume = s.v;
     c.pan = s.pan;
-    c.steps.fill(false, kStepCount);
+    for (int b = 0; b < kPatternCount; ++b)
+      c.steps[b].fill(false, kStepCount);
     for (int i = 0; i < kStepCount && s.steps[i]; ++i)
-      c.steps[i] = s.steps[i] == '1';
+      c.steps[pattern_][i] = s.steps[i] == '1';
     channels_.push_back(c);
   }
+  savePersisted();
+}
+
+void ChannelRack::setPattern(int pattern) {
+  const int p = qBound(0, pattern, kPatternCount - 1);
+  if (p == pattern_) return;
+  pattern_ = p;
+  for (int i = 0; i < patternButtons_.size(); ++i)
+    patternButtons_[i]->setChecked(i == p);
+  rebuildTable();
+  Q_EMIT edited();
+  savePersisted();
+}
+
+void ChannelRack::setSwing(int percent) {
+  swing_ = qBound(0, percent, kMaxSwing);
+  if (swingSlider_ && swingSlider_->value() != swing_)
+    swingSlider_->setValue(swing_);
   savePersisted();
 }
 
@@ -352,7 +448,8 @@ void ChannelRack::addChannel(const QString& name) {
   Channel c;
   c.name = name.isEmpty() ? QStringLiteral("Channel %1").arg(channels_.size() + 1)
                           : name;
-  c.steps.fill(false, kStepCount);
+  for (int b = 0; b < kPatternCount; ++b)
+    c.steps[b].fill(false, kStepCount);
   channels_.push_back(c);
   rebuildTable();
   setCurrent(channels_.size() - 1);
@@ -425,6 +522,8 @@ void ChannelRack::loadPersisted() {
   QSettings s;
   s.beginGroup("ui/channelRack");
   QByteArray blob = s.value("channels").toByteArray();
+  pattern_ = qBound(0, s.value("pattern").toInt(0), kPatternCount - 1);
+  swing_ = qBound(0, s.value("swing").toInt(0), kMaxSwing);
   s.endGroup();
   if (blob.isEmpty()) return;
   auto doc = QJsonDocument::fromJson(blob);
@@ -438,10 +537,20 @@ void ChannelRack::loadPersisted() {
     c.solo = o.value("s").toBool(false);
     c.volume = float(o.value("v").toDouble(0.8));
     c.pan = float(o.value("p").toDouble(0.0));
-    c.steps.fill(false, kStepCount);
-    QByteArray st = QByteArray::fromBase64(o.value("st").toString().toLatin1());
-    for (int i = 0; i < st.size() && i < kStepCount; ++i)
-      c.steps[i] = st[i] ? true : false;
+    for (int b = 0; b < kPatternCount; ++b) {
+      c.steps[b].fill(false, kStepCount);
+      const QString key = QStringLiteral("st%1").arg(b);
+      QByteArray st =
+          QByteArray::fromBase64(o.value(key).toString().toLatin1());
+      for (int i = 0; i < st.size() && i < kStepCount; ++i)
+        c.steps[b][i] = st[i] ? true : false;
+    }
+    // Legacy blob: a single "st" bank belongs to the first pattern.
+    if (o.contains("st") && !o.contains("st0")) {
+      QByteArray st = QByteArray::fromBase64(o.value("st").toString().toLatin1());
+      for (int i = 0; i < st.size() && i < kStepCount; ++i)
+        c.steps[0][i] = st[i] ? true : false;
+    }
     channels_.push_back(c);
   }
 }
@@ -455,14 +564,19 @@ void ChannelRack::savePersisted() {
     o.insert("s", c.solo);
     o.insert("v", double(c.volume));
     o.insert("p", double(c.pan));
-    QByteArray st(kStepCount, 0);
-    for (int i = 0; i < kStepCount; ++i) st[i] = c.steps[i] ? 1 : 0;
-    o.insert("st", QString::fromLatin1(st.toBase64()));
+    for (int b = 0; b < kPatternCount; ++b) {
+      QByteArray st(kStepCount, 0);
+      for (int i = 0; i < kStepCount; ++i) st[i] = c.steps[b][i] ? 1 : 0;
+      o.insert(QStringLiteral("st%1").arg(b),
+               QString::fromLatin1(st.toBase64()));
+    }
     arr.append(o);
   }
   QSettings s;
   s.beginGroup("ui/channelRack");
   s.setValue("channels", QJsonDocument(arr).toJson(QJsonDocument::Compact));
+  s.setValue("pattern", pattern_);
+  s.setValue("swing", swing_);
   s.endGroup();
 }
 

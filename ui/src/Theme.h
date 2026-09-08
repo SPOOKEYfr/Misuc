@@ -29,6 +29,7 @@ inline QColor kAccentPressed("#6f5cd6");
 inline QColor kAccentSoft("#2a2350");
 inline QColor kOk("#4ade80");
 inline QColor kDanger("#ff5c5c");
+inline QColor kDangerSoft(0x3a, 0x14, 0x17); // muted wine behind a combo or mute toggle
 inline QColor kMeterDim("#1f2836");
 inline QColor kMeterTrack("#263041");
 

@@ -290,10 +290,10 @@ protected:
       }
       int sx = mx + 22;
       p.setPen(Qt::NoPen);
-      p.setBrush(solo ? QColor(255,180,60) : theme::kBorderStrong);
+      p.setBrush(solo ? theme::kAccent : theme::kBorderStrong);
       p.drawEllipse(sx, iconY, 18, 18);
       if (solo) {
-        p.setPen(QPen(QColor(255,255,255), 2));
+        p.setPen(QPen(theme::kText, 2));
         QFont sf = p.font(); sf.setBold(true); sf.setPixelSize(10); p.setFont(sf);
         p.drawText(QRect(sx, iconY, 18, 18), Qt::AlignCenter, "S");
         p.setFont(f);

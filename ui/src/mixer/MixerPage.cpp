@@ -25,12 +25,17 @@ namespace misuc::ui {
 namespace {
 // Per-track accent colors (rotated by track index). The first channel follows
 // the active theme accent instead of a fixed literal so the mixer never
-// hardcodes brand colors; the rest stay on the stable rotation.
+// hardcodes brand colors; the rest stay on a stable rotation tuned to the
+// design system (desaturated slate/violet families — no rainbow/gaming look).
 const QColor kStripColors[] = {
-    QColor(0xff, 0x6b, 0x4a), QColor(0x22, 0xd3, 0xee),
-    QColor(0x4a, 0xde, 0x80), QColor(0xa9, 0x70, 0xff),
-    QColor(0xff, 0xb4, 0x54), QColor(0xff, 0x54, 0x70),
-    QColor(0x4f, 0x8b, 0xff), QColor(0x34, 0xd3, 0x99),
+    QColor(0x8f, 0x7b, 0xfa), // violet accent
+    QColor(0x9a, 0x8f, 0xc8), // muted lavender
+    QColor(0x8a, 0xa5, 0xb0), // slate teal
+    QColor(0x8f, 0xa0, 0x8c), // sage
+    QColor(0x9e, 0x95, 0x9b), // mauve
+    QColor(0x82, 0x8f, 0xa8), // steel blue
+    QColor(0xb0, 0x9f, 0x8b), // clay
+    QColor(0x98, 0xa0, 0x94), // muted grey-teal
 };
 } // namespace
 
@@ -38,8 +43,8 @@ MixerPage::MixerPage(Session& session, misuc::engine::AudioEngine& engine,
                      QWidget* parent)
     : QWidget(parent), session_(&session), engine_(engine) {
   auto* root = new QVBoxLayout(this);
-  root->setContentsMargins(32, 24, 32, 24);
-  root->setSpacing(16);
+  root->setContentsMargins(16, 10, 16, 10);
+  root->setSpacing(10);
 
   {
     auto* t = new QLabel(QStringLiteral("Mixer"), this);
@@ -60,7 +65,7 @@ MixerPage::MixerPage(Session& session, misuc::engine::AudioEngine& engine,
   scroll_->setWidgetResizable(true);
   scroll_->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
   scroll_->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-  scroll_->setMinimumHeight(200);
+  scroll_->setMinimumHeight(110);
   stripsHost_ = new QWidget(scroll_);
   stripsHost_->setObjectName(QStringLiteral("mixerHost"));
   scroll_->setWidget(stripsHost_);

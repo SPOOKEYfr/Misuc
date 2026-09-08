@@ -12,6 +12,8 @@
 #include <QTimer>
 #include <QGroupBox>
 #include <QButtonGroup>
+#include <QFrame>
+#include <QScrollArea>
 
 #include <misuc/engine/audio/AudioEngine.h>
 #include <misuc/engine/audio/AudioBackend.h>
@@ -44,9 +46,19 @@ QWidget* header(QWidget* parent, const QString& title, const QString& subtitle =
 AudioSettingsPage::AudioSettingsPage(misuc::engine::AudioEngine& engine,
                                      QWidget* parent)
     : QWidget(parent), engine_(engine) {
-  auto* root = new QVBoxLayout(this);
-  root->setContentsMargins(32, 24, 32, 24);
-  root->setSpacing(16);
+  // The page content lives in a scroll area so it never inflates the central
+  // tab widget's minimum (a settings page must shrink on small/1440p windows).
+  auto* scroll = new QScrollArea(this);
+  scroll->setObjectName(QStringLiteral("audioSettingsScroll"));
+  scroll->setWidgetResizable(true);
+  scroll->setFrameShape(QFrame::NoFrame);
+  scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  auto* content = new QWidget(scroll);
+  content->setObjectName(QStringLiteral("audioSettingsContent"));
+  auto* root = new QVBoxLayout(content);
+  root->setContentsMargins(24, 16, 24, 16);
+  root->setSpacing(12);
 
   root->addWidget(header(this, "Audio Setup",
                          "Pick your devices and buffer size, then apply. "
@@ -194,6 +206,11 @@ AudioSettingsPage::AudioSettingsPage(misuc::engine::AudioEngine& engine,
   connect(timer_, &QTimer::timeout, this, &AudioSettingsPage::poll);
   timer_->start();
   refreshDevices();
+
+  scroll->setWidget(content);
+  auto* outer = new QVBoxLayout(this);
+  outer->setContentsMargins(0, 0, 0, 0);
+  outer->addWidget(scroll);
 }
 
 void AudioSettingsPage::refreshDevices() {

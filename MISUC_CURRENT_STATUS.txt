@@ -389,6 +389,53 @@ name/gain/trim push mutations back through undo — verified by `qatool inspect`
 1440x900 and 1920x1080 (294 widgets each); behave smoke 9/9; snapshots
 pixel-verified.
 
+Phase 14.3 ADDENDUM — layout, palette, sequencer and hint-bar completion pack
+(2026-09-08). Supersedes the "18/18 done" framing: verification here is a mix
+of automated geometric/pixel/behavior probes AND a short human-desktop list at
+the end of this section. Changes, each in its own commit:
+  1. Layout at depth: the layout auditor (Geometric probe — every visible
+     widget's rect vs siblings/mins, screens clipped) now runs at 1280x720,
+     1366x768, 1600x900, 1920x1080, 2560x1440, 3840x2160 plus QT_SCALE_FACTOR
+     1.25/1.5/2.0 — all pass with issues=0 (306 widgets). Two real overflow
+     bugs were found and fixed: Audio Settings forced central-tab minimums that
+     could not fit 720-tall windows (page is now scrolled), and the Mixer
+     dock's minimum height overflowed short screens (margins/scroll minimum
+     tightened). Root cause was hard-coded minimums, not layout code.
+  2. Palette restraint: the eight neon mixer strip colors and the hard-coded
+     orange-solo/red-mute toggles were replaced with desaturated slate/violet
+     families built from design tokens; a muted wine token backs engaged
+     toggles. Pixel profiling of every snapshot shows 97.3-99.6% deep-chrome
+     pixels and trace saturated accents whose dominant hue is the violet
+     accent (0x8f7bfa); remaining colored pixels are iconography and the
+     gold note-flame logo (deliberate brand identity).
+  3. Channel Rack: four 16-step pattern banks (numbered selector) and a 0-66%
+     swing slider, both persisted via QSettings with legacy single-bank
+     migration; step lanes show a divider every four steps (16-step grouping).
+     The step sequencer remains a model/UI-and-persistence feature: the audio
+     pipeline is still frozen, so swing/pattern control the sequencer model
+     and the demo preview voice only, as documented (no fake DSP claims).
+  4. Hint Bar: hover hints now wait for the cursor to settle (360ms) instead
+     of strobing on every Enter; keyboard FocusIn surfaces the hint
+     immediately; leave/focus-out restore the default. The floating
+     MisucTooltip already had its own delay + screen-edge clamping.
+  5. Evidence footprint (offscreen, canonical resolution): qatool behave 18/18
+     (adds hint delay/settle/restore, keyboard-focus hint, swing clamp,
+     pattern switch, per-bank 16-step grouping); qatool inspect 5/5; engine
+     suite 54145 checks / 0 failures (engine untouched). Snapshots live at
+     /tmp/mc_b/shots2/r{resolution}.png for 1280x720..3840x2160 plus
+     studio1366x768.png / studio1920x1080.png (all docks revealed).
+
+HUMAN-DESKTOP VERIFICATION REQUIRED (the agent runs offscreen and cannot see
+images — every item below is unverified by pixel probe alone):
+  * Perceived depth/matte glass feel of the chrome under a real compositor.
+  * Hint hover "feel": settle delay ergonomics, no flicker while sweeping a
+    toolbar, and clamping near the screen edge in a real WM.
+  * Icon-only chrome legibility (glyph recognition at 100-125% scaling).
+  * Mixer strip color coding readability (muted slate vs violet master).
+  * Channel Rack pattern/swing interaction comfort at typical mouse speeds.
+  * Live PipeWire audio device open + monitoring (never auto-testable).
+  * Taskbar icon/WM_CLASS behavior and .deb icons under a real DE.
+
 17. COMPLETENESS PERCENTAGES (estimated, honest)
 -------------------------------------------------------------------------------
 - Current milestone spec (A-U table in §2): ~100% of scoped features done.

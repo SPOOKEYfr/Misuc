@@ -489,6 +489,11 @@ engine code changed.
   solo / volume / pan per channel, persisted per-rack snapshots to QSettings
   (base64 step masks), and a starter set of Kick / Snare / Hi-Hat / Bass /
   Sampler channels.
+  - **Phase 14.3**: four 16-step pattern banks (numbered selector) + a 0-66%
+    swing slider, both persisted (legacy single-bank blobs migrate); step
+    lanes gain a divider every four steps. Audio pipeline remains frozen, so
+    swing/pattern are sequencer-model controls documented as pending the
+    unfrozen playback path — never faked as DSP.
 - **Browser** (left dock): category tree (All Samples, Current Project,
   Instruments, Audio Effects, MIDI, Plugins — plugin rows are informational
   only, no fake DSP), recursive sample scan (Music + home music dirs, capped

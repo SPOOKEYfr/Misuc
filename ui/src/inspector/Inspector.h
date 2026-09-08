@@ -1,9 +1,12 @@
 #pragma once
 
 #include <QWidget>
+#include <QHash>
 
 class QLabel;
 class QLineEdit;
+class QPushButton;
+class QDoubleSpinBox;
 class QVBoxLayout;
 class QGridLayout;
 
@@ -38,9 +41,15 @@ protected:
 
 private:
   void addRow(const QString& label, const QString& hint = QString());
+  void addTextEdit(const QString& label, const QString& value,
+                   const QString& property, const QString& signalTarget);
+  void addToggle(const QString& label, bool on, const QString& property);
+  void addNumber(const QString& label, double value, double min, double max,
+                 const QString& property);
 
   QVBoxLayout* layout_ = nullptr;
   QGridLayout* grid_ = nullptr;
+  QHash<QString, QString> editorValue_; // last submitted value per property
   QLabel* icon_ = nullptr;
   QLabel* title_ = nullptr;
 };

@@ -68,6 +68,7 @@ private:
   void poll();
   void feedPlayhead();
   void onSessionEdited();
+  void onInspectorEdit(const QString& property, const QString& value);
   void refreshInspector();
   void syncWorkspaceStrip();
   // Help -> About Misuc…

@@ -400,6 +400,8 @@ void MainWindow::buildPages() {
   connect(mixerPage_, &MixerPage::edited, this,
           &MainWindow::onSessionEdited);
   connect(playlist_, &Playlist::edited, this, &MainWindow::onSessionEdited);
+  connect(inspector_, &Inspector::editRequest, this,
+          &MainWindow::onInspectorEdit);
   connect(channelRack_, &ChannelRack::edited, this,
           [this] { /* channel rack persists via QSettings, not the session */ });
 
@@ -427,6 +429,23 @@ void MainWindow::buildPages() {
   // Note audition: preview the pitch immediately, even while stopped.
   connect(editorPage_->piano(), &PianoRoll::audition, this,
           [this](double freq, float vel) { engine_.previewNote(freq, vel); });
+
+  // Starter sounds: audition the selected channel's base pitch through the real
+  // engine voice at its channel volume (no fabricated samples — honest preview).
+  connect(channelRack_, &ChannelRack::previewRequested, this,
+          [this](int row) {
+            if (row < 0)
+              return;
+            const double freq = channelRack_->previewFreq(row);
+            float vel = 0.7f;
+            const auto& ch = channelRack_->channels();
+            if (row < ch.size() && ch[row].volume > 0.0f)
+              vel = std::clamp(ch[row].volume, 0.05f, 1.0f);
+            engine_.previewNote(freq, vel);
+          });
+  connect(browser_, &Browser::previewRequested, this, [this] {
+    engine_.previewNote(220.0, 0.5f);
+  });
 
   // Playlist → piano-roll handoff: Open in Piano Roll.
   connect(playlist_, &Playlist::openInPianoRoll, this,
@@ -482,6 +501,14 @@ void MainWindow::buildPages() {
   hints_->registerHint(themePage_, QStringLiteral("Appearance"),
                        QStringLiteral("Theme presets, accent and glass"),
                        QString(), nullptr);
+
+  // Icon-only chrome registers its own tool hints per widget so the HintBar
+  // (§78) behaves like a full app-level status line with live values.
+  playlist_->attachHints(hints_);
+  channelRack_->attachHints(hints_);
+  browser_->attachHints(hints_);
+  transport_->attachHints(hints_);
+  headerBar_->attachHints(hints_);
 
   mixerPage_->syncToEngine();
 }
@@ -721,6 +748,44 @@ void MainWindow::restoreLayout() {
   const QSize saved = size.toSize();
   if (saved.isValid() && !saved.isEmpty())
     resize(saved);
+}
+
+void MainWindow::onInspectorEdit(const QString& property,
+                                 const QString& value) {
+  if (!playlist_) return;
+  auto sel = playlist_->selectionSummary();
+  if (sel.trackRow < 0) return;
+  auto* tr = session_.findTrack(sel.trackId.toStdString());
+  if (!tr) return;
+
+  if (property == "track.name") {
+    tr->name = value.toStdString();
+  } else if (property == "track.mute") {
+    tr->muted = value == "1";
+  } else if (property == "track.solo") {
+    tr->solo = value == "1";
+  } else if (property == "track.gain") {
+    tr->gainDb = value.toFloat();
+  } else if (property == "track.pan") {
+    tr->pan = qBound(-1.0f, value.toFloat(), 1.0f);
+  } else if (property.startsWith("clip.")) {
+    if (sel.clipIndex < 0 ||
+        sel.clipIndex >= static_cast<int>(tr->clips.size()))
+      return;
+    auto& clip = tr->clips[static_cast<size_t>(sel.clipIndex)];
+    if (property == "clip.name") {
+      clip.name = value.toStdString();
+    } else if (property == "clip.gain") {
+      clip.gainDb = value.toFloat();
+    } else if (property == "clip.trim") {
+      clip.clipOffsetBeats = value.toDouble();
+    } else {
+      return;
+    }
+  } else {
+    return;
+  }
+  onSessionEdited();
 }
 
 void MainWindow::refreshInspector() {

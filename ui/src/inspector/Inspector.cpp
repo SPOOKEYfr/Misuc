@@ -1,7 +1,10 @@
 #include "Inspector.h"
 
+#include <QDoubleSpinBox>
 #include <QGridLayout>
 #include <QLabel>
+#include <QLineEdit>
+#include <QPushButton>
 #include <QVBoxLayout>
 
 #include "Theme.h"
@@ -55,21 +58,92 @@ void Inspector::addRow(const QString& label, const QString& hint) {
   grid_->addWidget(val, row, 1);
 }
 
+void Inspector::addTextEdit(const QString& label, const QString& value,
+                            const QString& property, const QString& signalTarget) {
+  if (!grid_) rebuildGrid();
+  int row = grid_->rowCount();
+  auto* lab = new QLabel(label, this);
+  lab->setStyleSheet(QString("color: %1;").arg(theme::kTextDim.name()));
+  auto* edit = new QLineEdit(value, this);
+  edit->setStyleSheet(QString("background: %1; color: %2; border: 1px solid %3;"
+                              " border-radius: 3px; padding: 2px 6px;")
+                          .arg(theme::kChromeRaised.name(), theme::kText.name(),
+                               theme::kChromeBorder.name()));
+  connect(edit, &QLineEdit::editingFinished, this,
+          [this, property, edit, signalTarget] {
+            if (edit->text() != editorValue_[signalTarget]) {
+              editorValue_[signalTarget] = edit->text();
+              emit editRequest(property, edit->text());
+            }
+          });
+  grid_->addWidget(lab, row, 0);
+  grid_->addWidget(edit, row, 1);
+}
+
+void Inspector::addToggle(const QString& label, bool on,
+                          const QString& property) {
+  if (!grid_) rebuildGrid();
+  int row = grid_->rowCount();
+  auto* lab = new QLabel(label, this);
+  lab->setStyleSheet(QString("color: %1;").arg(theme::kTextDim.name()));
+  auto* btn = new QPushButton(on ? "ON" : "off", this);
+  btn->setCheckable(true);
+  btn->setChecked(on);
+  btn->setStyleSheet(QString("QPushButton { background: %1; color: %2;"
+                             " border: 1px solid %3; border-radius: 3px;"
+                             " padding: 2px 6px; font-weight: 600; }"
+                             " QPushButton:checked { background: %4;"
+                             " color: %5; border-color: %4; }")
+                         .arg(theme::kChromeRaised.name(), theme::kText.name(),
+                              theme::kChromeBorder.name(), theme::kAccent.name(),
+                              theme::kSurface.name()));
+  connect(btn, &QPushButton::toggled, this,
+          [this, property](bool on) {
+            emit editRequest(property, on ? "1" : "0");
+          });
+  grid_->addWidget(lab, row, 0);
+  grid_->addWidget(btn, row, 1);
+}
+
+void Inspector::addNumber(const QString& label, double value, double min,
+                          double max, const QString& property) {
+  if (!grid_) rebuildGrid();
+  int row = grid_->rowCount();
+  auto* lab = new QLabel(label, this);
+  lab->setStyleSheet(QString("color: %1;").arg(theme::kTextDim.name()));
+  auto* spin = new QDoubleSpinBox(this);
+  spin->setRange(min, max);
+  spin->setDecimals(property.contains("pan") ? 2 : 1);
+  spin->setSingleStep(property.contains("pan") ? 0.1 : 0.5);
+  if (property.contains("gain")) spin->setSuffix(" dB");
+  if (property.contains("trim") || property.contains("duration"))
+    spin->setSuffix(" b");
+  spin->setValue(value);
+  spin->setStyleSheet(QString("background: %1; color: %2; border: 1px solid %3;"
+                              " border-radius: 3px; padding: 2px 4px;")
+                          .arg(theme::kChromeRaised.name(), theme::kText.name(),
+                               theme::kChromeBorder.name()));
+  connect(spin, &QDoubleSpinBox::editingFinished, this,
+          [this, property, spin] {
+            emit editRequest(property, QString::number(spin->value(), 'f', 2));
+          });
+  grid_->addWidget(lab, row, 0);
+  grid_->addWidget(spin, row, 1);
+}
+
 void Inspector::showTrack(int row, const QString& name, bool muted, bool solo,
                           float gainDb, float pan) {
   rebuildGrid();
   title_->setText(name.isEmpty() ? QStringLiteral("[Track %1]").arg(row)
                                   : name);
-  QString panT;
-  if (pan < -0.01f) panT = pan * 100 < -1 ? QString("L%1").arg(int(-pan * 100))
-                                          : "L";
-  else if (pan > 0.01f) panT = QString("R%1").arg(int(pan * 100));
-  else panT = "C";
-  addRow("Track", name.isEmpty() ? QString::number(row + 1) : name);
-  addRow("Mute", muted ? "MUTED" : "on");
-  addRow("Solo", solo ? "SOLO" : "off");
-  addRow("Gain", QString::number(gainDb, 'f', 2) + " dB");
-  addRow("Pan", panT);
+  if (name.isEmpty())
+    addRow("Track", QString::number(row + 1));
+  else
+    addTextEdit("Track", name, "track.name", "track.name");
+  addToggle("Mute", muted, "track.mute");
+  addToggle("Solo", solo, "track.solo");
+  addNumber("Gain", gainDb, -60.0, 24.0, "track.gain");
+  addNumber("Pan", static_cast<double>(pan), -1.0, 1.0, "track.pan");
 }
 
 void Inspector::showAudioClip(const QString& name, const QString& source,
@@ -77,11 +151,12 @@ void Inspector::showAudioClip(const QString& name, const QString& source,
                               float gainDb, double clipOffsetBeats) {
   rebuildGrid();
   title_->setText(name);
+  addTextEdit("Name", name, "clip.name", "clip.name");
   addRow("Source", source);
   addRow("Start", QString::number(startBeats, 'f', 2) + " b");
   addRow("Length", QString::number(durationBeats, 'f', 2) + " b");
-  addRow("Trim-in", QString::number(clipOffsetBeats, 'f', 2) + " b");
-  addRow("Gain", QString::number(gainDb, 'f', 2) + " dB");
+  addNumber("Trim-in", clipOffsetBeats, 0.0, 100000.0, "clip.trim");
+  addNumber("Gain", gainDb, -60.0, 24.0, "clip.gain");
 }
 
 void Inspector::showMidiRegion(int noteCount, double startBeats,

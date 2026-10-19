@@ -18,11 +18,20 @@ jobs:
           arch: 'win64_msvc2022_64'
           cache: true
 
+      - name: Bootstrap vcpkg (image no longer exports VCPKG_ROOT)
+        shell: pwsh
+        run: |
+          $vcpkgDir = Join-Path $env:GITHUB_WORKSPACE 'vcpkg'
+          if (-not (Test-Path (Join-Path $vcpkgDir 'vcpkg.exe'))) {
+            git clone --depth 1 https://github.com/microsoft/vcpkg.git "$vcpkgDir"
+            & (Join-Path $vcpkgDir 'bootstrap-vcpkg.bat') -disableMetrics
+          }
+
       - name: Configure (vcpkg manifest deps - zlib, sndfile)
         shell: pwsh
         run: >
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+          -DCMAKE_TOOLCHAIN_FILE="$env:GITHUB_WORKSPACE\vcpkg\scripts\buildsystems\vcpkg.cmake"
 
       - name: Build
         shell: pwsh

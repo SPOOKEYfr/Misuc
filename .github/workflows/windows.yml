@@ -27,18 +27,19 @@ jobs:
             & (Join-Path $vcpkgDir 'bootstrap-vcpkg.bat') -disableMetrics
           }
 
-      - name: Install vcpkg deps (zlib, sndfile)
+      - name: Install vcpkg manifest deps (zlib, sndfile)
         shell: pwsh
         run: >
           & "$env:GITHUB_WORKSPACE\vcpkg\vcpkg.exe"
-          --triplet x64-windows install zlib sndfile
+          --triplet x64-windows install
 
-      - name: Configure (vcpkg manifest deps - zlib, sndfile)
+      - name: Configure (vcpkg deps - zlib, sndfile)
         shell: pwsh
         run: >
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64
           -DCMAKE_TOOLCHAIN_FILE="$env:GITHUB_WORKSPACE\vcpkg\scripts\buildsystems\vcpkg.cmake"
           -DVCPKG_TARGET_TRIPLET=x64-windows
+          -DVCPKG_MANIFEST_INSTALL=OFF
 
       - name: Build
         shell: pwsh

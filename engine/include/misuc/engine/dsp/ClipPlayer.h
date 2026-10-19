@@ -41,6 +41,20 @@ public:
   // interleaved stereo pair (mono when stride < 2).
   void render(const std::vector<PlaybackClip>& clips, float* outL, float* outR,
               uint32_t frames, uint32_t stride, uint64_t songFrame) noexcept {
+    renderImpl(clips, outL, outR, frames, stride, songFrame, false);
+  }
+
+  // Planar-stereo variant for the engine's per-track mixer: `outL` and `outR`
+  // are independent frame buffers (stride 1 each).
+  void renderPlanar(const std::vector<PlaybackClip>& clips, float* outL,
+                    float* outR, uint32_t frames, uint64_t songFrame) noexcept {
+    renderImpl(clips, outL, outR, frames, 1, songFrame, true);
+  }
+
+private:
+  void renderImpl(const std::vector<PlaybackClip>& clips, float* outL,
+                  float* outR, uint32_t frames, uint32_t stride,
+                  uint64_t songFrame, bool planar) noexcept {
     if (frames == 0 || outL == nullptr)
       return;
     if (outR == nullptr)
@@ -99,21 +113,23 @@ public:
             std::min<double>(idxD + 1.0, static_cast<double>(lastFrame)));
 
         const float g = c.gain * static_cast<float>(env);
-        if (stride > 1) { // stereo output
+        const uint32_t step =
+            planar ? 1 : stride; // planar buffers advance per frame
+        if (stride > 1 || planar) { // stereo output
           if (ch >= 2) {
             const float l0 = c.samples[static_cast<size_t>(i0) * ch];
             const float l1 = c.samples[static_cast<size_t>(i1) * ch];
             const float r0 = c.samples[static_cast<size_t>(i0) * ch + 1];
             const float r1 = c.samples[static_cast<size_t>(i1) * ch + 1];
-            outL[n * stride] += static_cast<float>(l0 + (l1 - l0) * frac) * g;
-            outR[n * stride] +=
+            outL[n * step] += static_cast<float>(l0 + (l1 - l0) * frac) * g;
+            outR[n * step] +=
                 static_cast<float>(r0 + (r1 - r0) * frac) * g;
           } else { // mono source, both output channels
             const float a = c.samples[i0];
             const float b = c.samples[i1];
             const float v = static_cast<float>(a + (b - a) * frac) * g;
-            outL[n * stride] += v;
-            outR[n * stride] += v; // outR is already the channel-1 base
+            outL[n * step] += v;
+            outR[n * step] += v; // planar/outR channel-1 base
           }
         } else { // mono output: average the source channels
           float acc = 0.0f;
@@ -130,7 +146,6 @@ public:
     }
   }
 
-private:
   double outputRate_ = 48000.0;
   double bpm_ = 120.0;
 };

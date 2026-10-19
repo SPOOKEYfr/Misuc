@@ -44,6 +44,8 @@ public:
   LatencyInfo latency() const override;
   std::string backendName() const override;
 
+  const AudioConfig& config() const override;
+
   // Called by PipeWire callbacks (public so the callback helpers can reach them).
   void onOutputProcess() noexcept;
   void onInputProcess() noexcept;

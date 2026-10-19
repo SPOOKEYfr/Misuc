@@ -62,6 +62,8 @@ public:
   virtual BackendStatus status() const = 0;
   virtual LatencyInfo latency() const = 0;
   virtual std::string backendName() const = 0;
+
+  virtual const AudioConfig& config() const = 0;
 };
 
 } // namespace misuc::engine

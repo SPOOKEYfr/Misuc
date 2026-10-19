@@ -18,8 +18,14 @@ enum class ControlKind : uint32_t {
   Loop        = 9, // f0 = enabled(0/1), d0 = startBeats, d1 = endBeats
   Record      = 10, // f0 = 1 start capture, 0 = stop capture (audio input)
   Seek        = 11, // d0 = target beat; jump the transport playhead there
-  PreviewSample = 12, // f0 = channels (1/2); arm a published one-shot sample
+PreviewSample = 12, // f0 = channels (1/2); arm a published one-shot sample
   ContentEnd  = 13, // d0 = arrangement end in beats; normal playback stops there
+  MasterLimiter = 14, // f0 = 0/1; master brickwall limiter (default on)
+  SetCaptureOffset = 15, // d0 = input-latency compensation in frames; applied
+                         // to the capture latch before record starts
+  PreviewGain    = 16, // f0 = linear gain for the one-shot sample preview
+  PreviewPause   = 17, // f0 = 1 paused, 0 resume (position is held while paused)
+  PreviewStop    = 18, // clear the armed sample preview immediately
 };
 
 struct alignas(8) ControlMessage {

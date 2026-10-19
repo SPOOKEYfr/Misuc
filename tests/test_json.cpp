@@ -47,12 +47,14 @@ TEST_CASE(json_parse_errors) {
 TEST_CASE(session_roundtrip) {
   Session s;
   s.setName("My First Track");
+  s.setArtist("The Artist");
   s.setTempo(97.5);
   s.setTimeSignature(3, 4);
   s.setSampleRate(44100);
 
   const Session loaded = Session::fromJson(s.toJson());
   TEST_ASSERT(loaded.name() == "My First Track");
+  TEST_ASSERT(loaded.artist() == "The Artist");
   TEST_ASSERT(loaded.tempo() == 97.5);
   TEST_ASSERT(loaded.timeSigNumerator() == 3);
   TEST_ASSERT(loaded.timeSigDenominator() == 4);
@@ -276,4 +278,36 @@ TEST_CASE(session_clip_paths_external_assets_stay_absolute) {
   rel.resolveAssets("/home/me/proj");
   TEST_ASSERT(rel.tracks()[0].clips[0].sourceFile ==
               "/home/me/proj/audio/in.wav");
+}
+
+TEST_CASE(session_rack_sound_files_track_clip_assets) {
+  // Sampler-channel sound references (Browser → Channel Rack drops) are
+  // portable project assets exactly like clip sources: relativized on save,
+  // resolved on load, external paths left absolute.
+  Session s;
+  auto& cr = s.channelRack();
+  misuc::project::StepChannel kick;
+  kick.id = s.newChannelId();
+  kick.name = "Kick";
+  kick.soundFile = "/home/me/proj/samples/kick_01.wav";
+  cr.channels.push_back(kick);
+
+  Session save = s;
+  save.relativizeAssets("/home/me/proj");
+  TEST_ASSERT(save.channelRack().channels[0].soundFile ==
+              "samples/kick_01.wav");
+
+  Session loaded = Session::fromJson(save.toJson());
+  TEST_ASSERT(loaded.channelRack().channels[0].soundFile ==
+              "samples/kick_01.wav");
+  loaded.resolveAssets("/home/me/proj");
+  TEST_ASSERT(loaded.channelRack().channels[0].soundFile ==
+              "/home/me/proj/samples/kick_01.wav");
+
+  // A sound outside the project folder keeps its absolute reference.
+  Session ext = s;
+  ext.channelRack().channels[0].soundFile = "/opt/samples/hit.wav";
+  ext.relativizeAssets("/home/me/proj");
+  TEST_ASSERT(ext.channelRack().channels[0].soundFile ==
+              "/opt/samples/hit.wav");
 }

@@ -142,6 +142,62 @@ public:
     }
   }
 
+  // True when any audition preview overlaps the wall-clock window
+  // [fromFrame, toFrame]. Used by the engine to skip the whole per-track mix
+  // while idle: the preview ring is the only wall-time signal the mix owns.
+  bool hasAudiblePreviews(uint64_t fromFrame, uint64_t toFrame) const noexcept {
+    if (fromFrame >= toFrame)
+      return false;
+    for (const Preview& p : previews_) {
+      if (p.dur <= 0.0 || p.freq <= 0.0 || p.gain <= 0.f)
+        continue;
+      if (p.start < static_cast<double>(toFrame) &&
+          p.start + p.dur > static_cast<double>(fromFrame))
+        return true;
+    }
+    return false;
+  }
+
+  // Planar-stereo score render for the engine's per-track mixer: `outL` and
+  // `outR` are independent frame buffers (stride 1 each). Single scan, single
+  // synth pass; same overlap/attack/release semantics as renderScore. The
+  // scan cursor is shared with renderScore (same score, same block), so the
+  // two must never be mixed within a block.
+  void renderScorePlanar(const std::vector<MidiNote>& score, bool includeScore,
+                         float* outL, float* outR, uint32_t frames,
+                         uint64_t songFrame) noexcept {
+    if (frames == 0 || outL == nullptr || outR == nullptr)
+      return;
+    const double fpb = (60.0 / bpm_) * sampleRate_;
+    if (!includeScore || score.empty() || fpb <= 0.0)
+      return;
+    const double t0 = static_cast<double>(songFrame);
+    const double t1 = t0 + static_cast<double>(frames);
+    const void* key = static_cast<const void*>(&score);
+    if (key != lastScore_ || t0 < lastT0_) {
+      cursor_ = 0;
+      lastScore_ = key;
+    }
+    lastT0_ = t0;
+    const double tail = kRelease * sampleRate_;
+    while (cursor_ < score.size() &&
+           (score[cursor_].startBeats + score[cursor_].durationBeats) * fpb +
+                   tail <=
+               t0)
+      ++cursor_;
+    for (size_t i = cursor_; i < score.size(); ++i) {
+      const MidiNote& n = score[i];
+      const double nStart = n.startBeats * fpb;
+      if (nStart >= t1)
+        break;
+      const double nDur = n.durationBeats * fpb;
+      if (nDur <= 0.0 || n.freq <= 0.0 || n.gain <= 0.f)
+        continue;
+      addNoteBlockPlanar(outL, outR, frames, t0, nStart, nStart + nDur,
+                         kAttack * sampleRate_, tail, n.freq, n.gain);
+    }
+  }
+
 private:
   struct Preview {
     double start = 0.0;
@@ -191,6 +247,46 @@ private:
       outL[idx * stride] += v;
       if (stride > 1)
         outR[idx * stride + 1] += v;
+    }
+  }
+
+  // Planar twin of addNoteBlock: writes both channels at per-frame index.
+  void addNoteBlockPlanar(float* outL, float* outR, uint32_t frames,
+                          double baseFrame, double nStart, double nEnd,
+                          double attack, double tail, double freq,
+                          float gain) const noexcept {
+    const double t1 = baseFrame + static_cast<double>(frames);
+    double lo = nStart > baseFrame ? nStart : baseFrame;
+    double hi = t1;
+    if (nEnd + tail < hi)
+      hi = nEnd + tail;
+    if (hi <= lo)
+      return;
+    const double envEnd =
+        1.0 - std::exp(-std::min(nEnd - nStart, attack) / attack);
+    const float g = gain * kLevel;
+    const int64_t s0 = static_cast<int64_t>(std::ceil(lo));
+    const int64_t s1 = static_cast<int64_t>(hi);
+    const int64_t baseI = static_cast<int64_t>(baseFrame);
+    const double twoPi = 6.28318530717958647692;
+    for (int64_t s = s0; s < s1; ++s) {
+      const double rel = static_cast<double>(s) - nStart;
+      double env;
+      if (s < static_cast<int64_t>(nEnd)) {
+        env = 1.0 - std::exp(-rel / attack);
+      } else {
+        env = envEnd * std::exp(-(static_cast<double>(s) - nEnd) / tail);
+      }
+      const double p = freq * rel / sampleRate_; // cycles elapsed
+      const double ph = p - std::floor(p);
+      const double w = std::sin(twoPi * ph) + 0.5 * std::sin(2.0 * twoPi * ph) +
+                       0.2 * std::sin(3.0 * twoPi * ph);
+      const float v = static_cast<float>(w * env) * g;
+      const uint32_t idx = static_cast<uint32_t>(s - baseI);
+      if (idx >= frames)
+        continue;
+      outL[idx] += v;
+      outR[idx] += v;
     }
   }
 

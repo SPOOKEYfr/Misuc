@@ -80,7 +80,10 @@ TEST_CASE(midi_playback_lifecycle) {
     return;
   }
   engine.play(false);
-  std::this_thread::sleep_for(std::chrono::milliseconds(90));
+  // Wait well beyond one device quantum (~170 ms at 48 kHz here) so the meter
+  // reliably captures a rendered block; 90 ms sat inside the first quantum and
+  // made this daemon-gated check flaky on large-buffer backends.
+  std::this_thread::sleep_for(std::chrono::milliseconds(600));
   const bool audible =
       engine.meterPeakL() > 0.01f || engine.meterRmsL() > 0.f;
   engine.stop();
@@ -152,8 +155,11 @@ TEST_CASE(groove_and_capture_lifecycle) {
   }
   engine.setGroove(true);
   engine.play(false);
-  std::this_thread::sleep_for(std::chrono::milliseconds(60));
-  const bool audible = engine.meterPeakL() > 0.01f || engine.meterRmsL() > 0.f;
+  bool audible = false;
+  for (int tries = 0; tries < 200 && !audible; ++tries) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    audible = engine.meterPeakL() > 0.01f || engine.meterRmsL() > 0.f;
+  }
   engine.setGroove(false);
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   engine.stop();

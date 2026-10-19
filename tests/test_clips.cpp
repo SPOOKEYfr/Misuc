@@ -103,10 +103,10 @@ TEST_CASE(wav_float_roundtrip) {
 
 TEST_CASE(wav_pcm16_roundtrip) {
   const std::string path = tempPath(".wav");
-  std::vector<float> s(2400);
-  for (size_t i = 0; i < 2400; ++i)
+  std::vector<float> s(2400 * 2); // 2400 stereo frames
+  for (size_t i = 0; i < s.size(); ++i)
     s[i] = 0.8f * std::sin(2.0 * 3.14159265358979 * 440.0 *
-                           static_cast<double>(i) / 48000.0);
+                           static_cast<double>(i / 2) / 48000.0);
   std::string err;
   TEST_ASSERT(writeWavSamples(path, s.data(), 2400, 2, 48000, true, err));
   AudioBuffer got;
@@ -358,13 +358,14 @@ TEST_CASE(record_capture_headless) {
   engine.stopRecord();
   engine.process(nullptr, 0, out.data(), 2, 32, pos, 48000); // drain stop
   TEST_ASSERT(!engine.isRecording());
-  std::vector<float> rec;
-  uint32_t sr = 0, ch = 0;
-  TEST_ASSERT(engine.takeRecordedSamples(rec, sr, ch));
-  TEST_ASSERT(ch == 1);
-  TEST_ASSERT(sr == 48000);
-  TEST_ASSERT(rec.size() == 10 * kChunk);
-  TEST_ASSERT(peak(rec, 2000, rec.size() - 2000) > 0.2f);
+  misuc::engine::RecordCapture cap;
+  TEST_ASSERT(engine.takeRecord(cap));
+  TEST_ASSERT(cap.channels == 1);
+  TEST_ASSERT(cap.sampleRate == 48000);
+  TEST_ASSERT(cap.samples.size() == 10 * kChunk);
+  TEST_ASSERT(cap.startBeats >= 0.0);
+  TEST_ASSERT(cap.endBeats > cap.startBeats);
+  TEST_ASSERT(peak(cap.samples, 2000, cap.samples.size() - 2000) > 0.2f);
 }
 
 TEST_CASE(clip_playback_through_engine_headless) {

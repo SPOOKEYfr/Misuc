@@ -58,9 +58,14 @@ public:
 
   static Json parse(const std::string& text);
 
-  // Current .misuc schema version (v2 adds tracks with MIDI notes; audio
-  // clips under each track are a compatible additive extension).
-  static constexpr int kSchemaVersion = 2;
+  // Current .misuc schema version. v2 added tracks with MIDI notes (audio
+  // clips under each track were a compatible additive extension). v3 adds the
+  // `format` marker ("misuc.song"), real created/modified UTC stamps, a strict
+  // version gate when loading (future documents are rejected with a clear
+  // error instead of silently mis-reading), and keeps every v2 field. Old
+  // documents (v1 flat notes, v2 tracks/regions) still load through the same
+  // tolerant read path.
+  static constexpr int kSchemaVersion = 3;
 
 private:
   void write(std::string& out) const;

@@ -177,6 +177,10 @@ PipeWireBackend::PipeWireBackend() { pw_init(nullptr, nullptr); }
 PipeWireBackend::~PipeWireBackend() { stop(); }
 
 std::string PipeWireBackend::backendName() const { return "PipeWire"; }
+
+const AudioConfig& PipeWireBackend::config() const {
+  return config_;
+}
 std::vector<uint32_t> PipeWireBackend::supportedSampleRates() const {
   return {22050, 32000, 44100, 48000, 88200, 96000, 192000};
 }
@@ -217,7 +221,14 @@ std::vector<AudioDeviceInfo> PipeWireBackend::enumerateDevices(bool input) {
     if (!ctx.cv.wait_for(lk, std::chrono::seconds(3), [&] { return ctx.done; }))
       result.clear();
   }
+  // Tear the enumerator down in order: stop the loop thread first so no
+  // registry/core callback can outlive the stack-resident EnumCtx (or scribble
+  // into later allocations). pw_thread_loop_stop() takes the loop lock itself,
+  // so it must be called after releasing it.
+  pw_thread_loop_lock(ctx.loop);
   pw_core_disconnect(ctx.core);
+  pw_thread_loop_unlock(ctx.loop);
+  pw_thread_loop_stop(ctx.loop);
   pw_context_destroy(ctx.context);
   pw_thread_loop_destroy(ctx.loop);
   return result;

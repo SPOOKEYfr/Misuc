@@ -28,6 +28,8 @@ inline bool buildClipScore(const misuc::project::Session& session,
   err.clear();
 
   size_t trackIndex = 0;
+  std::vector<size_t> sampleOffsets; // parallel to `clips`; used to rebase the
+                                     // pointers once storage stops reallocating
   for (const misuc::project::Track& t : session.tracks()) {
     if (t.clips.empty()) {
       ++trackIndex;
@@ -58,16 +60,27 @@ inline bool buildClipScore(const misuc::project::Session& session,
       pc.fadeOutBeats = c.fadeOutBeats;
       pc.track = static_cast<uint32_t>(trackIndex);
 
-      // Copy this clip's channels*frames interleaved samples into storage.
+      // The offset is recorded (not a raw pointer): subsequent inserts may
+      // reallocate `storage`, which would invalidate any baked-in pointer. The
+      // sample pointers are rebased against the final storage.data() below.
       const size_t first = storage.size();
       const uint64_t total =
           static_cast<uint64_t>(pc.frames) * static_cast<uint64_t>(pc.channels);
       storage.insert(storage.end(), buf.samples.begin(),
                      buf.samples.begin() + static_cast<ptrdiff_t>(total));
-      pc.samples = storage.data() + first;
+      pc.samples = nullptr; // placeholder; repointed once storage is final
       clips.push_back(pc);
+      sampleOffsets.push_back(first);
     }
     ++trackIndex;
+  }
+
+  // storage no longer reallocates: bind every clip's sample pointer to its
+  // final offset so the renderer reads a stable, owned buffer.
+  if (!storage.empty()) {
+    const float* base = storage.data();
+    for (size_t i = 0; i < clips.size(); ++i)
+      clips[i].samples = base + sampleOffsets[i];
   }
 
   std::sort(clips.begin(), clips.end(),

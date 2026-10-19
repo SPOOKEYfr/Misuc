@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.20)
 
 project(misuc
   VERSION 0.2.0
-  DESCRIPTION "Misuc - Professional Music Production for Linux"
+  DESCRIPTION "Misuc - Multi-track MIDI sequencer and audio workstation"
   LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -18,18 +18,40 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-set(CMAKE_CXX_FLAGS_RELEASE "-O3")
-add_compile_options(-Wall -Wextra)
+# Compiler-neutral warning levels (MSVC needs /W4 and never understands -Wall).
+if(MSVC)
+  add_compile_options(/W4 /EHsc /utf-8 /permissive-)
+  set(CMAKE_CXX_FLAGS_RELEASE "/O2")
+else()
+  add_compile_options(-Wall -Wextra)
+  set(CMAKE_CXX_FLAGS_RELEASE "-O3")
+endif()
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
-pkg_check_modules(ALSA     REQUIRED IMPORTED_TARGET alsa)
-pkg_check_modules(SNDFILE  REQUIRED IMPORTED_TARGET sndfile)
+# ---------------------------------------------------------------------------
+# Platform audio stack:
+#   Linux (and other pkg-config platforms) -> PipeWire + ALSA + pkg sndfile
+#   Windows -> WASAPI (system-provided)   + libsndfile via vcpkg manifest
+# The selected backend is wired into the engine by misuc_engine's CMakeLists
+# via MISUC_BACKEND_PIPEWIRE / MISUC_BACKEND_WASAPI compile definitions.
+# ---------------------------------------------------------------------------
+if(WIN32)
+  find_package(ZLIB REQUIRED)
+  find_package(unofficial-sndfile CONFIG REQUIRED)
+  set(MISUC_SNDFILE_TARGET unofficial::sndfile::sndfile)
+else()
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)
+  pkg_check_modules(ALSA     REQUIRED IMPORTED_TARGET alsa)
+  pkg_check_modules(SNDFILE  REQUIRED IMPORTED_TARGET sndfile)
+  set(MISUC_SNDFILE_TARGET PkgConfig::SNDFILE)
+endif()
 # LV2 effect hosting is optional: when the lilv dev libraries are present the
 # engine compiles the real-time FX rack; otherwise the session still round-trips
 # the "fx" schema and the UI shows the feature as unsupported.
-pkg_check_modules(LILV     IMPORTED_TARGET lilv-0)
-pkg_check_modules(LV2      IMPORTED_TARGET lv2)
+if(NOT WIN32)
+  pkg_check_modules(LILV     IMPORTED_TARGET lilv-0)
+  pkg_check_modules(LV2      IMPORTED_TARGET lv2)
+endif()
 if(LILV_FOUND AND LV2_FOUND)
   message(STATUS "LV2 hosting: ENABLED (lilv ${LILV_VERSION}, lv2 ${LV2_VERSION})")
 else()

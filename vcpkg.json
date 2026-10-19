@@ -1,0 +1,9 @@
+{
+  "name": "misuc",
+  "version-string": "0.2.0",
+  "description": "Multi-track MIDI sequencer and audio workstation",
+  "dependencies": [
+    "zlib",
+    "sndfile"
+  ]
+}

@@ -63,12 +63,16 @@ target_link_libraries(misuc_app PRIVATE
   misuc_ui_objs
   misuc_engine
   Qt6::Widgets)
+if(WIN32)
+  # HeaderBar CPU/RAM bookkeeping uses GetProcessMemoryInfo (psapi).
+  target_link_libraries(misuc_app PRIVATE psapi)
+endif()
 
 # Qt-converted resources (window icon, about image, user guide text). Compile
 # the .qrc explicitly with rcc - the AUTORCC path is unreliable here (Qt 6.4 /
 # CMake 3.28) and silently embeds nothing, which gutted the user guide.
 find_program(MISUC_RCC_EXECUTABLE NAMES rcc
-  HINTS /usr/lib/qt6/libexec ${Qt6_DIR}/../../../libexec)
+  HINTS ${Qt6_DIR}/../../../bin /usr/lib/qt6/libexec ${Qt6_DIR}/../../../libexec)
 add_custom_command(
   OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/qrc_resources.cpp
   COMMAND ${MISUC_RCC_EXECUTABLE} --name resources
@@ -97,21 +101,28 @@ target_link_libraries(misuc_qa PRIVATE
   misuc_ui_objs
   misuc_engine
   Qt6::Widgets)
+if(WIN32)
+  target_link_libraries(misuc_qa PRIVATE psapi)
+endif()
 
 # ---------------------------------------------------------------------------
 # Linux desktop integration: install the app, a real .desktop entry, and the
 # hicolor icon set rendered from branding/Logo.cpp by tools/rendericons.
+# Windows ships a plain ZIP of windeployqt output instead (CI artifact), so
+# the desktop-entry/icon-tree install only applies off-Windows.
 # ---------------------------------------------------------------------------
-install(TARGETS misuc_app RUNTIME DESTINATION bin)
+if(NOT WIN32)
+  install(TARGETS misuc_app RUNTIME DESTINATION bin)
 
-install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../assets/desktop/misuc.desktop
-        DESTINATION share/applications)
+  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../assets/desktop/misuc.desktop
+          DESTINATION share/applications)
 
-foreach(SIZE 16 22 24 32 48 64 128 256 512)
-  install(FILES
-      ${CMAKE_CURRENT_SOURCE_DIR}/../assets/hicolor/${SIZE}x${SIZE}/apps/misuc.png
-      DESTINATION share/icons/hicolor/${SIZE}x${SIZE}/apps)
-endforeach()
+  foreach(SIZE 16 22 24 32 48 64 128 256 512)
+    install(FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/../assets/hicolor/${SIZE}x${SIZE}/apps/misuc.png
+        DESTINATION share/icons/hicolor/${SIZE}x${SIZE}/apps)
+  endforeach()
+endif()
 
 # ---------------------------------------------------------------------------
 # Release packaging with CPack (`cmake --build build --target package`):
@@ -123,11 +134,16 @@ set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
 set(CPACK_PACKAGE_RELEASE "1")
 set(CPACK_PACKAGE_VENDOR "Misuc")
 set(CPACK_PACKAGE_CONTACT "misuc@localhost")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Multi-track MIDI sequencer and audio editor for Linux")
-set(CPACK_PACKAGE_FILE_NAME "misuc-${CPACK_PACKAGE_VERSION}-${CPACK_PACKAGE_RELEASE}-linux")
-set(CPACK_GENERATOR "DEB;TGZ")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Multi-track MIDI sequencer and audio workstation")
+if(WIN32)
+  set(CPACK_PACKAGE_FILE_NAME "misuc-${CPACK_PACKAGE_VERSION}-${CPACK_PACKAGE_RELEASE}-windows")
+  set(CPACK_GENERATOR "ZIP")
+else()
+  set(CPACK_PACKAGE_FILE_NAME "misuc-${CPACK_PACKAGE_VERSION}-${CPACK_PACKAGE_RELEASE}-linux")
+  set(CPACK_GENERATOR "DEB;TGZ")
+  set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+endif()
 set(CPACK_DEBIAN_FILE_NAME "${CPACK_PACKAGE_NAME}_${CPACK_PACKAGE_VERSION}-${CPACK_PACKAGE_RELEASE}_amd64.deb")
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://example.invalid/misuc")
 set(CPACK_SOURCE_GENERATOR "TGZ")
 include(CPack)

@@ -213,3 +213,14 @@
 - Longer human XRUN soak on live PipeWire (hardware trust for the headroom policy)
 - Metronome pattern-improvement pass (user request: richer click patterns/accents)
 - Per-track latency offsets + monitor-playthrough delay line (Phase Lat follow-up)
+
+## Windows port (branch: windows-port, Oct 2026)
+
+| Component | Status | Notes |
+|---|---|---|
+| WASAPI backend | REAL (code-complete) | Native shared-mode WASAPI backend satisfying the same `AudioBackend` contract as PipeWire: endpoint enumeration (friendly names, default endpoint first), event-driven render loop with per-callback frame negotiation, IEEE-float request at the configured rate/channels with WASAPI-side conversion (`AUTOCONVERTPCM`, Win10 1703+, mix-format fallback for older hosts), capture thread writing the same "latest snapshot" input scratch, MMCSS "Pro Audio" on both threads, QPC-gap xrun counter (same >3x heuristic), padding-derived output latency. Backend chosen per platform in CMake (`MISUC_BACKEND_WASAPI` / `MISUC_BACKEND_PIPEWIRE`); AudioEngine + misuc_app pick the platform default. |
+| Not yet validated on real hardware | NOT CLAIMED | The backend compiles via CI; device behaviour (latency figures, xrun soak, capture) has not been exercised on Windows hardware yet. CI smoke tests (`wasapi_device_enumeration`, `wasapi_stream_lifecycle`) skip silently on headless runners without endpoints. |
+| Build wiring | REAL | PipeWire/ALSA/pkg-config are required only off-Windows; Windows uses vcpkg manifest (`vcpkg.json`: zlib+sndfile) with the Visual Studio generator, MSVC-safe warning flags (`/W4 /EHsc /utf-8 /permissive-`), and links ole32/uuid/avrt/psapi. `HeaderBar` CPU/RAM now use GetProcessTimes/GetProcessMemoryInfo instead of /proc. |
+| Packaging | REAL (portable) | CPack ZIP generator for Windows (`misuc-<ver>-windows.zip`); CI workflow `.github/workflows/windows.yml` builds with MSVC 2022 + Qt 6.8, runs ctest, windeployqt's the app and uploads a portable ZIP artifact. No Windows installer yet (NOT-CLAIMED). |
+| LV2 on Windows | DISABLED | lilv/lv2 discovery is skipped on Windows; sessions round-trip the fx schema and the UI marks the feature unsupported, same as a Linux build without lilv. |
+| Linux parity | UNCHANGED | The Linux build path (PipeWire + pkg-config + CPack DEB) is byte-identical in intent; only the platform split is new. Linux tests still run the PipeWire live suite. |

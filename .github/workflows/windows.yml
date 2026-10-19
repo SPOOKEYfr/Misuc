@@ -1,0 +1,54 @@
+name: windows
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install Qt (MSVC 2022 x64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.0'
+          arch: 'win64_msvc2022_64'
+          cache: true
+
+      - name: Configure (vcpkg manifest deps: zlib, sndfile)
+        shell: pwsh
+        run: >
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_ROOT\scripts\buildsystems\vcpkg.cmake"
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --config Release
+
+      - name: Test
+        shell: pwsh
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Deploy Qt runtime (windeployqt)
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem build\bin\Release\misuc_app.exe -ErrorAction SilentlyContinue
+          if ($exe) { windeployqt --release $exe.FullName }
+
+      - name: Package ZIP
+        shell: pwsh
+        run: |
+          $stage = "dist/misuc-windows"
+          New-Item -ItemType Directory -Force -Path $stage | Out-Null
+          Copy-Item build\bin\Release\* $stage -Recurse -ErrorAction SilentlyContinue
+          Copy-Item LICENSE $stage
+          Compress-Archive -Path $stage\* -DestinationPath misuc-windows.zip
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: misuc-windows
+          path: misuc-windows.zip

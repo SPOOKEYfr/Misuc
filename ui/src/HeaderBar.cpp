@@ -13,7 +13,15 @@
 #include <QTextStream>
 #include <QToolButton>
 #include <QtGlobal>
+
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <psapi.h>
+#else
 #include <unistd.h>
+#endif
 
 #include <misuc/engine/audio/AudioBackend.h>
 #include <misuc/engine/audio/AudioEngine.h>
@@ -32,6 +40,40 @@ namespace misuc::ui {
 namespace {
 
 constexpr int kHeaderHeight = 56;
+
+#if defined(_WIN32)
+
+// CPU accounting via GetProcessTimes, RAM via GetProcessMemoryInfo. The
+// "jiffies" here are milliseconds (kernel/user ticks scaled to 1 ms), which
+// pairs with clockTicks_ = 1000 exactly like jiffies pair with _SC_CLK_TCK
+// = 100 on Linux — one platform-agnostic tick vocabulary.
+uint64_t processJiffies() {
+  FILETIME creation{};
+  FILETIME exitF{};
+  FILETIME kernel{};
+  FILETIME user{};
+  if (!::GetProcessTimes(::GetCurrentProcess(), &creation, &exitF, &kernel,
+                         &user))
+    return 0;
+  const auto toMs = [](const FILETIME& ft) -> uint64_t {
+    ULARGE_INTEGER v;
+    v.LowPart = ft.dwLowDateTime;
+    v.HighPart = ft.dwHighDateTime; // 100 ns units
+    return static_cast<uint64_t>(v.QuadPart) / 10000ull; // -> ms
+  };
+  return toMs(user) + toMs(kernel);
+}
+
+uint64_t processVmRssBytes() {
+  PROCESS_MEMORY_COUNTERS counters{};
+  counters.cb = sizeof counters;
+  if (!::GetProcessMemoryInfo(::GetCurrentProcess(), &counters,
+                              sizeof counters))
+    return 0;
+  return static_cast<uint64_t>(counters.WorkingSetSize);
+}
+
+#else
 
 // Sum utime+stime (fields 14/15 of /proc/<pid>/stat) over every thread of this
 // process — a real CPU accounting, not a fake percentage.
@@ -93,6 +135,8 @@ uint64_t processVmRssBytes() {
   }
   return 0;
 }
+
+#endif // !_WIN32
 
 QString formatBytes(uint64_t bytes) {
   if (bytes >= 1024ull * 1024 * 1024)
@@ -169,7 +213,11 @@ HeaderBar::HeaderBar(misuc::engine::AudioEngine& engine, QWidget* parent)
   setFloatable(false);
   setFixedHeight(kHeaderHeight);
   setIconSize(QSize(18, 18));
+#if defined(_WIN32)
+  clockTicks_ = 1000; // matches the ms "jiffies" from GetProcessTimes
+#else
   clockTicks_ = sysconf(_SC_CLK_TCK);
+#endif
   if (clockTicks_ <= 0)
     clockTicks_ = 100;
 

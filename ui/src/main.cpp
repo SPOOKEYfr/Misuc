@@ -10,7 +10,13 @@
 #include <QTimer>
 
 #include <misuc/engine/audio/AudioEngine.h>
+#if defined(_WIN32)
+#include <misuc/engine/audio/WASAPIBackend.h>
+using misuc::engine::WASAPIBackend;
+#else
 #include <misuc/engine/audio/PipeWireBackend.h>
+using misuc::engine::PipeWireBackend;
+#endif
 
 #include "MainWindow.h"
 #include "branding/Logo.h"
@@ -19,7 +25,6 @@
 #include "theme/ThemeEngine.h"
 
 using misuc::engine::AudioEngine;
-using misuc::engine::PipeWireBackend;
 
 namespace {
 
@@ -82,7 +87,13 @@ int main(int argc, char** argv) {
   QSplashScreen* splash = makeSplash();
   splash->show();
 
-  auto engine = std::make_unique<AudioEngine>(std::make_unique<PipeWireBackend>());
+  auto engine = std::make_unique<AudioEngine>(
+#if defined(_WIN32)
+      std::make_unique<WASAPIBackend>()
+#else
+      std::make_unique<PipeWireBackend>()
+#endif
+  );
   misuc::ui::MainWindow win(*engine);
 
   // Optional project path on the command line: `misuc_app <file.misuc>` opens

@@ -434,7 +434,11 @@ void AudioSettingsPage::attachHints(HintManager* hints) {
     return;
   const QPointer<AudioSettingsPage> self(this);
   hints->registerTool(outputDevices_, QStringLiteral("Output Device"),
+#if defined(_WIN32)
+                      QStringLiteral("Live WASAPI output to run the engine on"),
+#else
                       QStringLiteral("Live PipeWire output to run the engine on"),
+#endif
                       QString(), icons::IconId::Settings,
                       [self]() -> QString {
                         if (self.isNull() || !self->outputDevices_)
@@ -442,7 +446,11 @@ void AudioSettingsPage::attachHints(HintManager* hints) {
                         return self->outputDevices_->currentText();
                       });
   hints->registerTool(inputDevices_, QStringLiteral("Input Device"),
+#if defined(_WIN32)
+                      QStringLiteral("Live WASAPI input for recording"),
+#else
                       QStringLiteral("Live PipeWire input for recording"),
+#endif
                       QString(), icons::IconId::Settings,
                       [self]() -> QString {
                         if (self.isNull() || !self->inputDevices_)

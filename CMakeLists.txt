@@ -22,6 +22,9 @@ endif()
 if(MSVC)
   add_compile_options(/W4 /EHsc /utf-8 /permissive-)
   set(CMAKE_CXX_FLAGS_RELEASE "/O2")
+  # MSVC's <cmath> hides M_PI behind _USE_MATH_DEFINES (Groove.h, Icons.cpp,
+  # Knob.cpp use it); define it for every translation unit up front.
+  add_compile_definitions(_USE_MATH_DEFINES)
 else()
   add_compile_options(-Wall -Wextra)
   set(CMAKE_CXX_FLAGS_RELEASE "-O3")

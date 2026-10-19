@@ -3,6 +3,7 @@
 #include <cmath>
 
 #include <QDir>
+#include <QEvent>
 #include <QFile>
 #include <QFileInfo>
 #include <QFrame>
@@ -212,7 +213,9 @@ QWidget* HeaderBar::buildLeftCluster() {
   navLogo_ = new QLabel(host);
   navLogo_->setObjectName(QStringLiteral("navLogo"));
   navLogo_->setFixedSize(30, 30);
+  navLogo_->setCursor(Qt::PointingHandCursor);
   navLogo_->setVisible(true);
+  navLogo_->installEventFilter(this);
 
   wordmark_ = new QLabel(QStringLiteral("MISUC"), host);
   wordmark_->setObjectName(QStringLiteral("wordmark"));
@@ -352,42 +355,26 @@ void HeaderBar::setProjectName(const QString& name) {
 
 void HeaderBar::refresh() {
   refreshCpuRam();
+  syncStatusColors();
 
   const misuc::engine::BackendStatus st = engine_.backendStatus();
   if (st.running) {
-    srLabel_->setStyleSheet(QStringLiteral("color: %1; font-size: 11px; "
-                                           "font-weight: 600;")
-                                .arg(theme::kTextSecondary.name()));
     srLabel_->setText(QStringLiteral("%1 kHz").arg(st.negotiatedRate / 1000.0, 0,
                                                    'f', 1));
     const misuc::engine::LatencyInfo lat = engine_.latency();
-    latencyLabel_->setStyleSheet(QStringLiteral("color: %1; font-size: 11px; "
-                                                "font-weight: 600;")
-                                     .arg(theme::kTextSecondary.name()));
     latencyLabel_->setText(QStringLiteral("%1 fpb · %2 ms out")
                                .arg(st.negotiatedBuffer)
                                .arg(lat.outputMs, 0, 'f', 1));
-    xrunLabel_->setStyleSheet(QStringLiteral("color: %1; font-size: 11px; "
-                                             "font-weight: 700;")
-                                  .arg(theme::kMeterClip.name()));
     const uint64_t xruns = engine_.xruns();
     xrunLabel_->setText(xruns > 0 ? QStringLiteral("xruns %1").arg(xruns)
                                   : QString());
     stateLabel_->setText(engine_.isTransportPlaying() ? QStringLiteral("▶ playing")
                                                       : QStringLiteral("⏸ stopped"));
-    stateLabel_->setStyleSheet(QStringLiteral("color: %1; font-size: 11px; "
-                                              "font-weight: 700;")
-                                   .arg(engine_.isTransportPlaying()
-                                            ? theme::kMeterNormal.name()
-                                            : theme::kTextDim.name()));
   } else {
     srLabel_->setText(QStringLiteral("Hz —"));
     latencyLabel_->setText(QStringLiteral("buf —"));
     xrunLabel_->setText(QString());
     stateLabel_->setText(QStringLiteral("● idle"));
-    stateLabel_->setStyleSheet(QStringLiteral("color: %1; font-size: 11px; "
-                                              "font-weight: 600;")
-                                   .arg(theme::kMeterClip.name()));
   }
 
   meters_->setPeaks(engine_.meterPeakL(), engine_.meterPeakR(),
@@ -402,21 +389,42 @@ void HeaderBar::refreshCpuRam() {
   if (cpuLastJiffies_ > 0 && ms > 0) {
     const double used = static_cast<double>(j - cpuLastJiffies_) * 1000.0 /
                         (clockTicks_ * ms);
-    cpuLabel_->setStyleSheet(QStringLiteral("color: %1; font-size: 11px; "
-                                            "font-weight: 600;")
-                                 .arg(theme::kTextSecondary.name()));
     cpuLabel_->setText(QStringLiteral("CPU %1%").arg(used, 0, 'f', 1));
     const uint64_t rss = processVmRssBytes();
-    QColor ramColor = theme::kTextSecondary;
-    if (rss > 1024ull * 1024 * 1024)
-      ramColor = theme::kMeterHot;
-    ramLabel_->setStyleSheet(QStringLiteral("color: %1; font-size: 11px; "
-                                            "font-weight: 600;")
-                                 .arg(ramColor.name()));
     ramLabel_->setText(QStringLiteral("RAM %1").arg(formatBytes(rss)));
   }
   cpuLastJiffies_ = j;
   cpuTimer_.restart();
+  syncStatusColors();
+}
+
+void HeaderBar::syncStatusColors() {
+  if (!cpuLabel_)
+    return;
+  const QColor dim = theme::kTextDim;
+  const QColor sec = theme::kTextSecondary;
+  const QColor clip = theme::kMeterClip;
+  const QColor norm = theme::kMeterNormal;
+  const auto apply = [this](const QLabel* lab, const QColor& c) {
+    QColor cached = statusColorCache_.value(lab);
+    if (cached.isValid() && cached == c)
+      return;
+    statusColorCache_.insert(lab, c);
+    const_cast<QLabel*>(lab)->setStyleSheet(
+        QStringLiteral("color: %1; font-size: 11px; font-weight: 600;")
+            .arg(c.name()));
+  };
+  const QColor ram = (processVmRssBytes() > 1024ull * 1024 * 1024)
+                         ? theme::kMeterHot
+                         : sec;
+  apply(cpuLabel_, sec);
+  apply(ramLabel_, ram);
+  apply(srLabel_, sec);
+  apply(latencyLabel_, sec);
+  apply(xrunLabel_, clip);
+  apply(stateLabel_, engine_.isTransportPlaying()
+                        ? (engine_.backendStatus().running ? norm : dim)
+                        : clip);
 }
 
 void HeaderBar::refreshLogo() {
@@ -424,6 +432,15 @@ void HeaderBar::refreshLogo() {
     return;
   const QColor accent = theme::kAccent;
   navLogo_->setPixmap(logoPixmap(30, accent, theme::kAccentSoft));
+}
+
+bool HeaderBar::eventFilter(QObject* watched, QEvent* event) {
+  if (watched == navLogo_ &&
+      event->type() == QEvent::MouseButtonRelease) {
+    Q_EMIT projectRequested();
+    return true;
+  }
+  return QWidget::eventFilter(watched, event);
 }
 
 void HeaderBar::attachHints(HintManager* hints) {

@@ -20,6 +20,7 @@
 
 #include <misuc/engine/audio/WavFile.h>
 #include <misuc/engine/dsp/Midi.h>
+#include <misuc/engine/dsp/Pitch.h>
 
 using misuc::project::NoteEvent;
 using misuc::project::AudioClip;
@@ -29,7 +30,7 @@ namespace misuc::ui {
 
 namespace {
 
-constexpr double kSnapBeats = 0.25; // 1/16 note
+constexpr double kSnapBeats = 0.03125; // finest selectable grid: 1/32
 constexpr int kHighPitch = PianoRoll::kLowPitch + PianoRoll::kRowCount - 1;
 constexpr int kVelocityStep = 127 / 25; // one wheel notch
 constexpr int kVelocityCommitMs = 280;  // undo-snapshot debounce
@@ -47,17 +48,8 @@ int yToPitch(int y, int rowH) {
                     PianoRoll::kLowPitch, kHighPitch);
 }
 
-bool isBlackKey(int pitch) {
-  const int c = pitch % 12;
-  return c == 1 || c == 3 || c == 6 || c == 8 || c == 10;
-}
-
 QString pitchLabel(int pitch) {
-  static const char* names[] = {"C",  "C#", "D",  "D#", "E",  "F",
-                                "F#", "G",  "G#", "A",  "A#", "B"};
-  return QStringLiteral("%1%2")
-      .arg(names[pitch % 12])
-      .arg(pitch / 12 - 1);
+  return QString::fromStdString(misuc::dsp::midiToNoteName(pitch));
 }
 
 } // namespace
@@ -225,7 +217,7 @@ PianoKeys::PianoKeys(QWidget* parent) : QWidget(parent) {
 
 QSize PianoKeys::sizeHint() const {
   return QSize(PianoRoll::kKeyWidth,
-               PianoRoll::kRowCount * PianoRoll::kRowH +
+               PianoRoll::kRowCount * rowH_ +
                    PianoRoll::kClipLaneH + PianoRoll::kVelLaneH);
 }
 
@@ -271,7 +263,7 @@ void PianoKeys::paintEvent(QPaintEvent*) {
     if (y + rowH_ < y0 || y > y1)
       continue;
     const QRect row(0, y, width() - 1, rowH_ - 1);
-    if (isBlackKey(pitch)) {
+    if (misuc::dsp::isBlackKey(pitch)) {
       p.fillRect(row, theme::kPanelSunken);
       p.setPen(QPen(theme::kBorder, 1));
       p.drawRect(row.adjusted(0, 0, -1, -1));
@@ -300,10 +292,11 @@ public:
   explicit Canvas(PianoRoll* owner) : QWidget(owner), owner_(owner) {
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
+    setObjectName(QStringLiteral("pianoCanvas")); // QA-harness navigation handle
     setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     setFixedSize(
         static_cast<int>(owner_->horizonBeats() * owner_->pxPerBeat_) + 1,
-        PianoRoll::kRowCount * PianoRoll::kRowH + PianoRoll::kClipLaneH +
+        PianoRoll::kRowCount * owner_->rowH_ + PianoRoll::kClipLaneH +
             PianoRoll::kVelLaneH + 1);
     // Wheel velocity edits are committed once the gesture settles so a single
     // scroll burst produces exactly one undo snapshot.
@@ -317,20 +310,20 @@ public:
 
   double xToBeat(double x) const { return x / owner_->pxPerBeat_; }
   double beatToX(double beat) const { return beat * owner_->pxPerBeat_; }
-  int yToPitch(int y) const { return ::misuc::ui::yToPitch(y, owner_->kRowH); }
+  int yToPitch(int y) const { return ::misuc::ui::yToPitch(y, owner_->rowH_); }
   int pitchToY(int pitch) const {
-    return ::misuc::ui::pitchRowY(pitch, owner_->kRowH);
+    return ::misuc::ui::pitchRowY(pitch, owner_->rowH_);
   }
   double snapped(double beat) const {
     if (!owner_->snap_)
       return beat;
-    return std::round(beat / kSnapBeats) * kSnapBeats;
+    return std::round(beat / owner_->snapBeats_) * owner_->snapBeats_;
   }
 
   // Quantize always snaps to the fixed 1/16 grid, regardless of the snap
   // toggle (which only gates manual placement/drag gestures).
   double quantized(double beat) const {
-    return std::round(beat / kSnapBeats) * kSnapBeats;
+    return std::round(beat / 0.25) * 0.25;
   }
 
   void setPlayheadBeat(double beats, bool visible) {
@@ -442,7 +435,7 @@ public:
     const double x = beatToX(n.startBeats);
     const double w = std::max<double>(3.0, n.durationBeats * owner_->pxPerBeat_ - 1.0);
     const int y = pitchToY(n.pitch);
-    return QRectF(x, y, w, owner_->kRowH - 1);
+    return QRectF(x, y, w, owner_->rowH_ - 1);
   }
 
   // --- Audio clips -------------------------------------------------------
@@ -577,8 +570,9 @@ public:
       return;
     AudioClip copy = t->clips[selectedClip_];
     const double ns =
-        std::clamp(copy.startBeats + copy.durationBeats + kSnapBeats, 0.0,
-                   owner_->horizonBeats() - copy.durationBeats);
+        std::clamp(copy.startBeats + copy.durationBeats +
+                       owner_->snapBeats_,
+                   0.0, owner_->horizonBeats() - copy.durationBeats);
     copy.id.clear(); // Session::addClip assigns a new unique id
     copy.startBeats = ns;
     owner_->session_.addClip(t->id, std::move(copy));
@@ -617,6 +611,37 @@ public:
       const double q = quantized(n.startBeats);
       if (std::fabs(q - n.startBeats) > 1e-6) {
         n.startBeats = q;
+        changed = true;
+      }
+    }
+    update();
+    if (changed)
+      owner_->commit();
+  }
+
+  // Velocity tool: nudges the selection's velocities by `delta` (clamped to
+  // 1..127) in one undo snapshot. Operates on the selection only, so the nudge
+  // never surprises the user by touching notes they did not pick.
+  void nudgeVelocity(int delta) {
+    Track* t = trackEdit();
+    if (!t)
+      return;
+    std::vector<int> targets;
+    if (selected_ >= 0)
+      targets.push_back(selected_);
+    for (const int i : selectSet_)
+      if (i != selected_)
+        targets.push_back(i);
+    if (targets.empty())
+      return;
+    bool changed = false;
+    for (const int i : targets) {
+      if (i < 0 || i >= static_cast<int>((*notesRef()).size()))
+        continue;
+      NoteEvent& n = (*notesRef())[i];
+      const int v = std::clamp(static_cast<int>(n.velocity) + delta, 1, 127);
+      if (v != static_cast<int>(n.velocity)) {
+        n.velocity = static_cast<uint8_t>(v);
         changed = true;
       }
     }
@@ -819,7 +844,7 @@ protected:
       // Velocity bar: vertical bar growing from the note floor, height
       // proportional to how hard the note is struck.
       const double vh =
-          (static_cast<double>(n.velocity) / 127.0) * (owner_->kRowH - 8);
+          (static_cast<double>(n.velocity) / 127.0) * (owner_->rowH_ - 8);
       p.setPen(Qt::NoPen);
       p.setBrush(theme::kOk);
       p.drawRect(
@@ -1291,7 +1316,7 @@ protected:
         }
         copySelection();
         if (!clipboard_.empty())
-          insertPasted(clipAnchor_ + kSnapBeats);
+          insertPasted(clipAnchor_ + owner_->snapBeats_);
         e->accept();
         return;
       }
@@ -1299,7 +1324,7 @@ protected:
         const double base =
             (playheadVisible_ && playheadBeats_ >= 0.0)
                 ? snapped(playheadBeats_)
-                : clipAnchor_ + kSnapBeats;
+                : clipAnchor_ + owner_->snapBeats_;
         insertPasted(base);
         e->accept();
         return;
@@ -1310,10 +1335,29 @@ protected:
       e->accept();
       return;
     }
+    if (e->modifiers().testFlag(Qt::AltModifier)) {
+      const int k = e->key();
+      if (k == Qt::Key_Up || k == Qt::Key_Down) {
+        const int step = (e->modifiers().testFlag(Qt::ShiftModifier) ? 12 : 1);
+        const int delta = (k == Qt::Key_Up) ? step : -step;
+        nudgeVelocity(delta);
+        e->accept();
+        return;
+      }
+    }
     QWidget::keyPressEvent(e);
   }
 
   void wheelEvent(QWheelEvent* e) override {
+    if (e->modifiers().testFlag(Qt::ControlModifier) &&
+        e->modifiers().testFlag(Qt::ShiftModifier)) {
+      // Ctrl+Shift+wheel = vertical zoom (row height per semitone).
+      const int delta = e->angleDelta().y();
+      if (delta != 0)
+        owner_->setRowHeight(owner_->rowH_ + (delta > 0 ? 2 : -2));
+      e->accept();
+      return;
+    }
     if (e->modifiers().testFlag(Qt::ControlModifier)) {
       const double factor = e->angleDelta().y() > 0 ? 1.12 : 1.0 / 1.12;
       owner_->setZoom(owner_->pxPerBeat_ * factor);
@@ -1386,6 +1430,7 @@ Track* PianoRoll::Canvas::trackEdit() {
 
 PianoRoll::PianoRoll(misuc::project::Session& session, QWidget* parent)
     : QWidget(parent), session_(session) {
+  setAttribute(Qt::WA_OpaquePaintEvent);
   auto* root = new QVBoxLayout(this);
   root->setContentsMargins(0, 0, 0, 0);
   root->setSpacing(0);
@@ -1403,9 +1448,10 @@ PianoRoll::PianoRoll(misuc::project::Session& session, QWidget* parent)
   topRow->addWidget(ruler_, 1);
   root->addLayout(topRow);
   ruler_->onLoopDrawn = [this](double lo, double hi) {
-    const double fs = std::round(lo / kSnapBeats) * kSnapBeats;
-    const double fe = std::round(hi / kSnapBeats) * kSnapBeats;
-    if (fe - fs < kSnapBeats)
+    const double sb = snap_ ? snapBeats_ : 0.25; // always grid-align loops
+    const double fs = std::round(lo / sb) * sb;
+    const double fe = std::round(hi / sb) * sb;
+    if (fe - fs < sb)
       return;
     session_.setLoop(true, fs, fe);
     ruler_->setLoop(true, fs, fe);
@@ -1450,6 +1496,27 @@ PianoRoll::PianoRoll(misuc::project::Session& session, QWidget* parent)
     keys_->update();
   });
   setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+}
+
+void PianoRoll::showEvent(QShowEvent* e) {
+  QWidget::showEvent(e);
+  if (centerMiddleOnce_ || !vbar_ || !scroller_ || !scroller_->viewport())
+    return;
+  centerMiddleOnce_ = true;
+  // Land the first view on middle C (C4, MIDI 60) so the usable C1..C7
+  // keyboard is immediately in view instead of the top of the 0..127 range.
+  // Defer one event-loop turn so the scroll area has been laid out and its
+  // range/maximum are final before we compute the offset.
+  QMetaObject::invokeMethod(
+      this,
+      [this] {
+        const double vh = scroller_->viewport()->height();
+        const int target =
+            static_cast<int>(kClipLaneH + (kHighPitch - 60.0) * rowH_ -
+                             vh / 2.0);
+        vbar_->setValue(target <= 0 ? 0 : std::min(target, vbar_->maximum()));
+      },
+      Qt::QueuedConnection);
 }
 
 void PianoRoll::setTrack(const QString& id) {
@@ -1539,7 +1606,16 @@ void PianoRoll::quantize() {
   canvas_->quantizeSelection();
 }
 
+void PianoRoll::nudgeVelocity(int delta) {
+  canvas_->nudgeVelocity(delta);
+}
+
 void PianoRoll::setPlayhead(bool playing, double beats) {
+  // Skip the full-edit refresh when nothing visible moved (MainWindow feeds
+  // this at 30 Hz even while idle). While playing, guard against re-rendering
+  // when the caret is off-screen (follow disabled): only the caret redraws.
+  if (playheadPlaying_ == playing && std::abs(beats - playheadBeats_) < 1e-9)
+    return;
   playheadPlaying_ = playing;
   playheadBeats_ = beats;
   refresh();
@@ -1558,11 +1634,11 @@ void PianoRoll::refresh() {
   ruler_->setLoop(session_.loopMode(), session_.loopStart(),
                   session_.loopEnd());
   ruler_->setRegionName(r ? QString::fromStdString(r->name) : QString());
-  keys_->setRange(kLowPitch, kRowH, vbarValue_);
+  keys_->setRange(kLowPitch, rowH_, vbarValue_);
   if (canvas_) {
     canvas_->setPlayheadBeat(playheadBeats_, playheadBeats_ >= 0.0);
     const int w = static_cast<int>(horizonBeats() * pxPerBeat_) + 1;
-    const int h = kRowCount * kRowH + kClipLaneH + kVelLaneH + 1;
+    const int h = kRowCount * rowH_ + kClipLaneH + kVelLaneH + 1;
     if (canvas_->width() != w || canvas_->height() != h)
       canvas_->setFixedSize(w, h);
     canvas_->update();
@@ -1595,7 +1671,17 @@ void PianoRoll::setZoom(double px) {
   pxPerBeat_ = std::clamp(px, 8.0, 160.0);
   canvas_->setFixedSize(
       static_cast<int>(horizonBeats() * pxPerBeat_) + 1,
-      kRowCount * kRowH + kClipLaneH + kVelLaneH + 1);
+      kRowCount * rowH_ + kClipLaneH + kVelLaneH + 1);
+  refresh();
+}
+
+void PianoRoll::setRowHeight(int rowH) {
+  rowH_ = std::clamp(rowH, 12, 48);
+  canvas_->setFixedSize(
+      static_cast<int>(horizonBeats() * pxPerBeat_) + 1,
+      kRowCount * rowH_ + kClipLaneH + kVelLaneH + 1);
+  keys_->setRange(kLowPitch, rowH_, vbarValue_);
+  keys_->update();
   refresh();
 }
 

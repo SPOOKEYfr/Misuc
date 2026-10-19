@@ -770,6 +770,29 @@ void drawWaveform(QPainter& p, const QRectF& r) {
   p.drawPath(w);
 }
 
+void drawRefresh(QPainter& p, const QRectF& r) {
+  // Circular arrow: open arc with a barbed head, clockwise.
+  const double cx = r.center().x();
+  const double cy = r.center().y();
+  const double R = r.width() * 0.32;
+  QPen pen(p.pen().color());
+  pen.setWidthF(1.5);
+  pen.setCapStyle(Qt::RoundCap);
+  p.setPen(pen);
+  p.setBrush(Qt::NoBrush);
+  const QRectF ring(cx - R, cy - R, 2 * R, 2 * R);
+  // Arc open to the top-right; the barrel gap lets the arrowhead stand out.
+  p.drawArc(ring, 120 * 16, 300 * 16);
+  // Arrowhead at the top-right end of the arc.
+  QPen headPen(p.pen().color());
+  headPen.setWidthF(1.5);
+  headPen.setCapStyle(Qt::RoundCap);
+  p.setPen(headPen);
+  const double rx = R * 0.707;
+  p.drawLine(QPointF(cx + rx, cy - rx), QPointF(cx + rx + 3.5, cy - rx - 3.5));
+  p.drawLine(QPointF(cx + rx, cy - rx), QPointF(cx + rx + 4.2, cy - rx + 1.4));
+}
+
 void drawApp(QPainter& p, const QRectF& r) {
   const double cx = r.center().x();
   const double cy = r.center().y();
@@ -860,6 +883,7 @@ DrawFn drawFn(IconId id) {
     case IconId::Question: return drawQuestion;
     case IconId::Settings: return drawSettings;
     case IconId::Waveform: return drawWaveform;
+    case IconId::Refresh: return drawRefresh;
     default: return nullptr;
   }
 }

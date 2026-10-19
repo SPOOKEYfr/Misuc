@@ -14,12 +14,17 @@
 #include <QButtonGroup>
 #include <QFrame>
 #include <QScrollArea>
+#include <QSettings>
+#include <limits>
+#include <cstdlib>
 
 #include <misuc/engine/audio/AudioEngine.h>
 #include <misuc/engine/audio/AudioBackend.h>
 
 #include "MeterWidget.h"
 #include "Theme.h"
+#include "HintSystem.h"
+#include "branding/Icons.h"
 
 namespace misuc::ui {
 
@@ -177,6 +182,76 @@ AudioSettingsPage::AudioSettingsPage(misuc::engine::AudioEngine& engine,
   meterCol->addLayout(statusRow, 1);
   meterCol->addLayout(meterRowInner);
   root->addLayout(meterCol);
+
+  // Session recovery settings (protocol #7 Part 1). Compact group in the
+  // existing Settings UI, not a separate panel.
+  auto* recGroup = new QGroupBox(QStringLiteral("Session Recovery"), this);
+  auto* recForm = new QFormLayout(recGroup);
+  autosaveChk_ = new QCheckBox(QStringLiteral("Autosave recovery copies"), recGroup);
+  autosaveChk_->setObjectName(QStringLiteral("autosaveChk"));
+  autosaveCombo_ = new QComboBox(recGroup);
+  autosaveCombo_->setObjectName(QStringLiteral("autosaveIntervalCombo"));
+  static const struct {
+    const char* label;
+    int seconds;
+  } kIntervals[] = {
+      {"Disabled", 0},     {"1 minute", 60},   {"5 minutes", 300},
+      {"10 minutes", 600}, {"15 minutes", 900}, {"30 minutes", 1800},
+      {"60 minutes", 3600},
+  };
+  for (const auto& iv : kIntervals)
+    autosaveCombo_->addItem(QLatin1String(iv.label), iv.seconds);
+  autosaveCombo_->setEnabled(false);
+  auto* recNote = new QLabel(
+      QStringLiteral("While you work, a safe recovery copy of the project is "
+                     "written to the app data folder on this interval and "
+                     "offered for restore on the next launch. It never "
+                     "overwrites your normal Save."),
+      recGroup);
+  recNote->setWordWrap(true);
+  recNote->setStyleSheet(QStringLiteral("color: %1;")
+                             .arg(theme::kTextDim.name()));
+  saveNowBtn_ = new QPushButton(QStringLiteral("Save Recovery Copy Now"), recGroup);
+  saveNowBtn_->setObjectName(QStringLiteral("autosaveNowBtn"));
+  recForm->addRow(QStringLiteral("Autosave"), autosaveChk_);
+  recForm->addRow(QStringLiteral("Interval"), autosaveCombo_);
+  recForm->addRow(saveNowBtn_);
+  recForm->addRow(recNote);
+  root->addWidget(recGroup);
+
+  // Intake the persisted interval; off by default only when stored 0.
+  const int stored = []() -> int {
+    QSettings settings(QStringLiteral("misuc"), QStringLiteral("misuc"));
+    return settings.value(QStringLiteral("autosave/intervalSeconds"), 90)
+        .toInt();
+  }();
+  int best = 1; // nearest preset; "5 minutes" if stored 90 only matches none
+  int bestDelta = std::numeric_limits<int>::max();
+  for (int i = 0; i < autosaveCombo_->count(); ++i) {
+    const int delta = std::abs(autosaveCombo_->itemData(i).toInt() - stored);
+    if (delta < bestDelta) {
+      bestDelta = delta;
+      best = i;
+    }
+  }
+  autosaveCombo_->setCurrentIndex(best);
+  autosaveChk_->setChecked(stored > 0);
+  autosaveCombo_->setEnabled(stored > 0);
+  // Wire the controls only after the persisted state has been staged so the
+  // init does not emit a phantom interval change.
+  connect(autosaveChk_, &QCheckBox::toggled, this, [this](bool on) {
+    autosaveCombo_->setEnabled(on);
+    emit autosaveIntervalChanged(on ? autosaveCombo_->currentData().toInt()
+                                    : 0);
+  });
+  connect(autosaveCombo_, qOverload<int>(&QComboBox::activated), this,
+          [this](int) {
+            if (autosaveChk_->isChecked())
+              emit autosaveIntervalChanged(
+                  autosaveCombo_->currentData().toInt());
+          });
+  connect(saveNowBtn_, &QPushButton::clicked, this,
+          [this] { emit autosaveNowRequested(); });
 
   // Action buttons.
   auto* actions = new QHBoxLayout();
@@ -352,6 +427,108 @@ void AudioSettingsPage::poll() {
     meter_->clear();
     inMeter_->clear();
   }
+}
+
+void AudioSettingsPage::attachHints(HintManager* hints) {
+  if (!hints)
+    return;
+  const QPointer<AudioSettingsPage> self(this);
+  hints->registerTool(outputDevices_, QStringLiteral("Output Device"),
+                      QStringLiteral("Live PipeWire output to run the engine on"),
+                      QString(), icons::IconId::Settings,
+                      [self]() -> QString {
+                        if (self.isNull() || !self->outputDevices_)
+                          return QString();
+                        return self->outputDevices_->currentText();
+                      });
+  hints->registerTool(inputDevices_, QStringLiteral("Input Device"),
+                      QStringLiteral("Live PipeWire input for recording"),
+                      QString(), icons::IconId::Settings,
+                      [self]() -> QString {
+                        if (self.isNull() || !self->inputDevices_)
+                          return QString();
+                        return self->inputDevices_->currentText();
+                      });
+  hints->registerTool(sampleRate_, QStringLiteral("Sample Rate"),
+                      QStringLiteral("Rate negotiated with the audio device"),
+                      QString(), icons::IconId::Settings,
+                      [self]() -> QString {
+                        if (self.isNull() || !self->sampleRate_) return QString();
+                        return self->sampleRate_->currentText();
+                      });
+  hints->registerTool(bufferSize_, QStringLiteral("Buffer Size"),
+                      QStringLiteral("Device buffer in frames; smaller reduces "
+                                     "latency, larger is safer"), QString(),
+                      icons::IconId::Settings,
+                      [self]() -> QString {
+                        if (self.isNull() || !self->bufferSize_) return QString();
+                        return self->bufferSize_->currentText();
+                      });
+  hints->registerTool(gainSlider_, QStringLiteral("Master Gain"),
+                      QStringLiteral("Output level of the whole mix"),
+                      QString(), icons::IconId::None,
+                      [self]() -> QString {
+                        if (self.isNull() || !self->gainSlider_) return QString();
+                        return QStringLiteral("%1 dB").arg(self->gainSlider_->value());
+                      });
+  hints->registerTool(monitorSlider_, QStringLiteral("Monitor Gain"),
+                      QStringLiteral("Level of the direct input monitor"),
+                      QString(), icons::IconId::None,
+                      [self]() -> QString {
+                        if (self.isNull() || !self->monitorSlider_) return QString();
+                        return QStringLiteral("%1 dB").arg(self->monitorSlider_->value());
+                      });
+  hints->registerTool(monitorChk_, QStringLiteral("Monitor Input"),
+                      QStringLiteral("Hear the input device through the "
+                                     "engine"), QString(), icons::IconId::Audio,
+                      [self]() -> QString {
+                        if (self.isNull() || !self->monitorChk_) return QString();
+                        return self->monitorChk_->isChecked() ? QStringLiteral("on")
+                                                              : QStringLiteral("off");
+                      });
+  hints->registerTool(toneBtn_, QStringLiteral("Test Tone"),
+                      QStringLiteral("Play a 440 Hz tone to verify the audio "
+                                     "path"), QString(), icons::IconId::Waveform,
+                      [self]() -> QString {
+                        if (self.isNull() || !self->toneBtn_) return QString();
+                        return self->toneBtn_->isChecked() ? QStringLiteral("playing")
+                                                           : QString();
+                      });
+  hints->registerTool(grooveChk_, QStringLiteral("Groove"),
+                      QStringLiteral("Loosen the engine timing for a swung, "
+                                     "human feel"), QString(), icons::IconId::None,
+                      [self]() -> QString {
+                        if (self.isNull() || !self->grooveChk_) return QString();
+                        return self->grooveChk_->isChecked() ? QStringLiteral("on")
+                                                             : QStringLiteral("off");
+                      });
+  hints->registerTool(openBtn_, QStringLiteral("Apply & Start"),
+                      QStringLiteral("Open the selected device with the chosen "
+                                     "rate and buffer"), QString(),
+                      icons::IconId::Play);
+  hints->registerTool(autosaveChk_, QStringLiteral("Autosave"),
+                      QStringLiteral("Write a recovery copy of the project on "
+                                     "the configured interval"), QString(),
+                      icons::IconId::SaveDoc,
+                      [self]() -> QString {
+                        if (self.isNull() || !self->autosaveChk_) return QString();
+                        return self->autosaveChk_->isChecked() ? QStringLiteral("on")
+                                                               : QStringLiteral("off");
+                      });
+  hints->registerTool(autosaveCombo_, QStringLiteral("Autosave Interval"),
+                      QStringLiteral("How often a recovery copy is written "
+                                     "("
+                                     "1–60 minutes; disabled = no recovery "
+                                     "copies)"), QString(),
+                      icons::IconId::SaveDoc,
+                      [self]() -> QString {
+                        if (self.isNull() || !self->autosaveCombo_) return QString();
+                        return self->autosaveCombo_->currentText();
+                      });
+  hints->registerTool(saveNowBtn_, QStringLiteral("Save Recovery Copy Now"),
+                      QStringLiteral("Immediately write the recovery copy "
+                                     "without waiting for the interval"),
+                      QString(), icons::IconId::SaveDoc);
 }
 
 } // namespace misuc::ui

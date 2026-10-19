@@ -1,25 +1,72 @@
 #include <memory>
 
 #include <QApplication>
+#include <QFileInfo>
 #include <QIcon>
+#include <QPainter>
+#include <QPixmap>
 #include <QSettings>
+#include <QSplashScreen>
+#include <QTimer>
 
 #include <misuc/engine/audio/AudioEngine.h>
 #include <misuc/engine/audio/PipeWireBackend.h>
 
 #include "MainWindow.h"
 #include "branding/Logo.h"
+#include "branding/MisucVersion.h"
 #include "project/DemoProject.h"
 #include "theme/ThemeEngine.h"
 
 using misuc::engine::AudioEngine;
 using misuc::engine::PipeWireBackend;
 
+namespace {
+
+// Branded launch card drawn with the shared vector logo on the near-black
+// default foundation, classic splash behaviour (superseded once the window is
+// mapped). Purely cosmetic; offscreen runs exercise the same code path.
+QSplashScreen* makeSplash() {
+  const int w = 560;
+  const int h = 340;
+  QPixmap pm(w, h);
+  pm.fill(QColor(QStringLiteral("#0a0a0c")));
+  {
+    QPainter p(&pm);
+    p.setRenderHint(QPainter::Antialiasing);
+    const QColor accent = misuc::ui::logoAccent();
+    const QColor soft = misuc::ui::logoAccentSoft();
+    misuc::ui::drawLogo(p, QRectF(w / 2.0 - 95.0, 24.0, 190.0, 190.0),
+                        accent, soft, misuc::ui::logoCore());
+    QFont brand = p.font();
+    brand.setPixelSize(36);
+    brand.setBold(true);
+    p.setFont(brand);
+    p.setPen(QColor(QStringLiteral("#ececef")));
+    p.drawText(QRectF(0, 222, w, 52), Qt::AlignHCenter,
+               QStringLiteral("Misuc"));
+    QFont sub = p.font();
+    sub.setPixelSize(14);
+    sub.setBold(false);
+    p.setFont(sub);
+    p.setPen(QColor(QStringLiteral("#8b8b94")));
+    p.drawText(QRectF(0, 276, w, 30), Qt::AlignHCenter,
+               QStringLiteral("DAW · version %1")
+                   .arg(QCoreApplication::applicationVersion()));
+    p.end();
+  }
+  auto* splash = new QSplashScreen();
+  splash->setPixmap(pm);
+  return splash;
+}
+
+} // namespace
+
 int main(int argc, char** argv) {
   QApplication app(argc, argv);
   QApplication::setApplicationName(QStringLiteral("Misuc"));
   QApplication::setOrganizationName(QStringLiteral("Misuc"));
-  QApplication::setApplicationVersion(QStringLiteral("0.1.0"));
+  QApplication::setApplicationVersion(QStringLiteral(MISUC_VERSION_STRING));
 
   app.setStyle(QStringLiteral("Fusion"));
 
@@ -32,9 +79,20 @@ int main(int argc, char** argv) {
   misuc::ui::ThemeEngine::instance().loadPersisted();
   misuc::ui::ThemeEngine::instance().apply(app);
 
+  QSplashScreen* splash = makeSplash();
+  splash->show();
+
   auto engine = std::make_unique<AudioEngine>(std::make_unique<PipeWireBackend>());
   misuc::ui::MainWindow win(*engine);
 
+  // Optional project path on the command line: `misuc_app <file.misuc>` opens
+  // that project instead of the first-run demo.
+  const QStringList args = QCoreApplication::arguments();
+  const QString argProject =
+      args.size() > 1 && QFileInfo::exists(args.at(1)) ? args.at(1) : QString();
+  if (!argProject.isEmpty()) {
+    win.openProject(argProject);
+  } else {
   // First run: boot straight into the bundled demo so the user immediately sees
   // real arrangement structure (lanes, clips, notes) and hears audio. The demo
   // is a genuine project file on disk; File > New Demo Project… reopens it.
@@ -47,8 +105,16 @@ int main(int argc, char** argv) {
       settings.setValue(QStringLiteral("demoCreated"), true);
     }
   }
+  }
 
   win.show();
+  splash->finish(&win);
+  splash->deleteLater();
+
+  // Crash recovery: if a periodic autosave holds a session from a previous run
+  // (and the user did not just discard it at close), offer to restore it.
+  QTimer::singleShot(0, &win, &misuc::ui::MainWindow::checkAutosaveRecovery);
+
   const int rc = app.exec();
   engine->closeAudio();
   return rc;

@@ -18,6 +18,7 @@ class AudioEngine;
 namespace misuc::ui {
 
 class MeterWidget;
+class HintManager;
 
 // Real audio configuration page. Lists devices discovered from the live
 // PipeWire backend, lets the user choose sample rate / buffer size, starts and
@@ -38,6 +39,14 @@ public:
   // (48 kHz / 256 frames on the first enumerated output). Failure is silent;
   // the Audio Settings page keeps its honest running/failed status.
   void autoStart();
+
+  // Registers hints for the audio configuration controls.
+  void attachHints(HintManager* hints);
+
+signals:
+  // Session-recovery preferences, forwarded to the MainWindow autosave timer.
+  void autosaveIntervalChanged(int seconds);
+  void autosaveNowRequested();
 
 private Q_SLOTS:
   void refreshDevices();
@@ -60,6 +69,9 @@ private:
   QComboBox* bufferSize_ = nullptr;
   QCheckBox* monitorChk_ = nullptr;
   QCheckBox* grooveChk_ = nullptr;
+  QCheckBox* autosaveChk_ = nullptr;
+  QComboBox* autosaveCombo_ = nullptr;
+  QPushButton* saveNowBtn_ = nullptr;
 
   QPushButton* openBtn_ = nullptr;
   QPushButton* toneBtn_ = nullptr;

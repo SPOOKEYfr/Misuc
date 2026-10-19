@@ -53,6 +53,16 @@ TransportBar::TransportBar(misuc::engine::AudioEngine& engine, QWidget* parent)
 
 void TransportBar::setCountInOn(bool on) { countIn_ = on; }
 
+void TransportBar::setMetronomeVolume(float v) {
+  metronomeVol_ = (v < 0.f ? 0.f : (v > 1.f ? 1.f : v));
+  update();
+}
+
+void TransportBar::setCountInBeats(float b) {
+  countInBeats_ = (b < 1.f ? 1.f : (b > 64.f ? 64.f : b));
+  update();
+}
+
 void TransportBar::setLoopOn(bool on) {
   loopOn_ = on;
   update();
@@ -69,15 +79,27 @@ void TransportBar::setSongMode(bool song) {
 }
 
 void TransportBar::refresh() {
-  playing_ = engine_.isTransportPlaying();
-  recording_ = engine_.isRecording();
-  playhead_ = engine_.playheadSamples();
+  const bool p = engine_.isTransportPlaying();
+  const bool r = engine_.isRecording();
+  const uint64_t ph = engine_.playheadSamples();
   const misuc::engine::Transport& tr = engine_.transport();
   const double t = tr.tempo();
+  const int n = tr.timeSigNumerator();
+  const int d = tr.timeSigDenominator();
+  // Only repaint when something actually changed. This widget aura-paints the
+  // entire bar (gradient, buttons, ruler, timecode), so a blanket update() on
+  // every 30 Hz poll tick kept repainting it endlessly on an idle machine -
+  // the transport mirrored the playlist grid's old flicker + CPU burn.
+  if (p == playing_ && r == recording_ && ph == playhead_ && t == tempo_ &&
+      n == tsNum_ && d == tsDen_)
+    return;
+  playing_ = p;
+  recording_ = r;
+  playhead_ = ph;
   if (t > 0.0) {
     tempo_ = t;
-    tsNum_ = tr.timeSigNumerator();
-    tsDen_ = tr.timeSigDenominator();
+    tsNum_ = n;
+    tsDen_ = d;
   }
   update();
 }
@@ -116,17 +138,29 @@ void TransportBar::paintEvent(QPaintEvent*) {
     p.setBrush(c);
     p.setPen(QPen(playing_ ? theme::kAccent : theme::kBorderBright, 1.5));
     p.drawPath(path);
-    // Triangle glyph.
-    QPainterPath tri;
+    // Glyph: pause (two vertical bars) when playing, triangle (play) when stopped.
     const double cx = playBtn_.center().x();
     const double cy = playBtn_.center().y();
-    tri.moveTo(cx + 6, cy);
-    tri.lineTo(cx - 3, cy + 7);
-    tri.lineTo(cx - 3, cy - 7);
-    tri.closeSubpath();
+    const double barW = 3.5;
+    const double barH = 9;
+    const double gap = 3;
+    QPainterPath glyph;
+    if (playing_) {
+      // Pause: two vertical bars
+      double leftX = cx - gap - barW;
+      double rightX = cx + gap;
+      glyph.addRect(leftX, cy - barH / 2, barW, barH);
+      glyph.addRect(rightX, cy - barH / 2, barW, barH);
+    } else {
+      // Play: triangle pointing right
+      glyph.moveTo(cx + 5, cy);
+      glyph.lineTo(cx - 4, cy + 8);
+      glyph.lineTo(cx - 4, cy - 8);
+      glyph.closeSubpath();
+    }
     p.setPen(Qt::NoPen);
     p.setBrush(playing_ ? theme::kBackground : theme::kText);
-    p.drawPath(tri);
+    p.drawPath(glyph);
     p.restore();
   }
 
@@ -290,16 +324,24 @@ void TransportBar::mousePressEvent(QMouseEvent* event) {
   } else if (stopBtn_.contains(pos)) {
     engine_.stop();
   } else if (clickBtn_.contains(pos)) {
-    countIn_ = !countIn_;
-    emit countInToggled(countIn_);
+    if (event->button() == Qt::RightButton) {
+      // Cycle the count-in lead-in length (metronome click count).
+      const float next =
+          countInBeats_ <= 1.0f ? 2.0f : (countInBeats_ <= 2.0f ? 4.0f : 1.0f);
+      countInBeats_ = next;
+      emit countInBeatsChanged(countInBeats_);
+    } else {
+      countIn_ = !countIn_;
+      emit countInToggled(countIn_);
+    }
     update();
   } else if (loopBtn_.contains(pos)) {
     loopOn_ = !loopOn_;
     emit loopToggled(loopOn_);
     update();
   } else if (recordBtn_.contains(pos)) {
-    recording_ = !recording_;
-    emit recordToggled(recording_);
+    // Open Record Setup dialog instead of directly toggling
+    emit recordRequested();
     update();
   } else if (snapBtn_.contains(pos)) {
     snap_ = !snap_;
@@ -311,6 +353,27 @@ void TransportBar::mousePressEvent(QMouseEvent* event) {
     update();
   }
   QWidget::mousePressEvent(event);
+}
+
+void TransportBar::wheelEvent(QWheelEvent* event) {
+  // Wheel over the metronome button scrubs the click level (0..1).
+  const double stepDeg = event->angleDelta().y() / 8.0;
+  if (clickBtn_.contains(QPointF(event->position()))) {
+    float v = metronomeVol_ + 0.05f * static_cast<float>(stepDeg / 15.0);
+    if (stepDeg > 0.0)
+      v = metronomeVol_ + (stepDeg >= 120.0 ? 0.1f : 0.05f);
+    else if (stepDeg < 0.0)
+      v = metronomeVol_ - (stepDeg <= -120.0 ? 0.1f : 0.05f);
+    v = (v < 0.f ? 0.f : (v > 1.f ? 1.f : v));
+    if (std::fabs(v - metronomeVol_) > 1e-4f) {
+      metronomeVol_ = v;
+      emit metronomeVolumeChanged(metronomeVol_);
+      update();
+    }
+    event->accept();
+    return;
+  }
+  QWidget::wheelEvent(event);
 }
 
 QString TransportBar::positionText() const {
@@ -395,9 +458,17 @@ void TransportBar::attachHints(HintManager* hints) {
                   QStringLiteral("S"), icons::IconId::Stop);
       case 2:
         return mk(QStringLiteral("Metronome"),
-                  QStringLiteral("Play a full bar of click before recording"),
-                  QString(), icons::IconId::Metronome,
-                  liveBool("off", "on", &TransportBar::countIn_));
+                  QStringLiteral("Click and count-in lead; wheel scrubs level, "
+                                 "right-click cycles count-in length"),
+                  QString(), icons::IconId::Metronome, [self]() -> QString {
+                    if (self.isNull())
+                      return QString();
+                    return QStringLiteral("%1 · %2% · %3-beat")
+                        .arg(self->countIn_ ? QLatin1String("on")
+                                            : QLatin1String("off"))
+                        .arg(qRound(self->metronomeVol_ * 100.0))
+                        .arg(qRound(self->countInBeats_));
+                  });
       case 3:
         return mk(QStringLiteral("Loop"),
                   QStringLiteral("Loop playback over the active section"),

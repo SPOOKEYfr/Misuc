@@ -10,6 +10,7 @@
 
 #include <misuc/engine/audio/WavFile.h>
 #include <misuc/engine/core/Json.h>
+#include <misuc/engine/core/ProjectFile.h>
 #include <misuc/engine/project/Session.h>
 
 namespace misuc::ui {
@@ -151,14 +152,20 @@ bool ensureDemoProject(DemoPaths& out, QString& err) {
   }
 
   misuc::project::Session s = buildDemoSession(out.wav);
-  const std::string text = s.toJson();
-  QFile f(out.project);
-  if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-    err = QStringLiteral("could not write demo project: %1").arg(out.project);
+  // Write the demo as the native .misuc container so first-run also exercises
+  // the real format (and stays consistent with every user-saved document).
+  const std::string meta =
+      std::string("{\"format\":\"misuc.container\",\"containerVersion\":") +
+      std::to_string(misuc::core::kContainerFormatVersion) +
+      ",\"app\":\"misuc\",\"modifiedUtc\":\"" + misuc::core::utcNowIso() + "\"}";
+  std::vector<misuc::core::ContainerEntry> entries;
+  entries.push_back({misuc::core::kContainerMetaEntry, meta});
+  entries.push_back({misuc::core::kContainerSongEntry, s.toJson()});
+  std::string cerr;
+  if (!misuc::core::writeContainer(out.project.toStdString(), entries, &cerr)) {
+    err = QString::fromStdString(cerr);
     return false;
   }
-  f.write(text.data(), static_cast<qint64>(text.size()));
-  f.close();
   return true;
 }
 

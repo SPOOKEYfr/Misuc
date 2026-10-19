@@ -1,11 +1,13 @@
 #include "ThemePage.h"
 
 #include <QApplication>
+#include <QButtonGroup>
 #include <QCheckBox>
 #include <QColorDialog>
 #include <QComboBox>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMessageBox>
@@ -15,8 +17,20 @@
 
 #include "ThemeEngine.h"
 #include "../Theme.h"
+#include "HintSystem.h"
 
 namespace misuc::ui {
+
+namespace {
+
+const char* kLayoutDescriptions[] = {
+    "Studio home: browser left, inspector right, mixer below",
+    "Arrangement: wide timeline, narrow browser, low mixer",
+    "Mix-down: channel rack docked above the inspector on the right",
+    "Note editing: piano roll central, rack + browser stacked left",
+};
+
+} // namespace
 
 ThemePage::ThemePage(QWidget* parent) : QWidget(parent) {
   auto* root = new QVBoxLayout(this);
@@ -65,6 +79,34 @@ ThemePage::ThemePage(QWidget* parent) : QWidget(parent) {
   io->addWidget(loadBtn);
   root->addLayout(io);
 
+  auto* wlTitle = new QLabel(QStringLiteral("Workspace layout"), this);
+  wlTitle->setFont(theme::uiFont(12, QFont::Bold));
+  root->addWidget(wlTitle);
+  auto* wlDesc = new QLabel(
+      QStringLiteral("Real dock arrangements \u2014 panels stay movable, "
+                     "resizable, floatable and closable in every preset. "
+                     "Choosing a preset moves the panel dividers; dragging a "
+                     "panel switches to a custom layout that Misuc remembers."),
+      this);
+  wlDesc->setStyleSheet(QStringLiteral("color: %1;").arg(theme::kTextDim.name()));
+  wlDesc->setWordWrap(true);
+  root->addWidget(wlDesc);
+
+  layoutGrid_ = new QGridLayout();
+  layoutGrid_->setSpacing(8);
+  root->addLayout(layoutGrid_);
+
+  auto* layoutRow = new QHBoxLayout();
+  layoutRow->setSpacing(10);
+  layoutStatus_ = new QLabel(this);
+  layoutStatus_->setStyleSheet(QStringLiteral("color: %1;")
+                                   .arg(theme::kTextDim.name()));
+  layoutRow->addWidget(layoutStatus_, 1);
+  resetWorkspaceBtn_ = new QPushButton(QStringLiteral("Reset Workspace"), this);
+  resetWorkspaceBtn_->setCursor(Qt::PointingHandCursor);
+  layoutRow->addWidget(resetWorkspaceBtn_);
+  root->addLayout(layoutRow);
+
   auto* pcap = new QLabel(QStringLiteral("Live preview"), this);
   pcap->setStyleSheet(
       QStringLiteral("color: %1;").arg(theme::kTextDim.name()));
@@ -87,10 +129,69 @@ ThemePage::ThemePage(QWidget* parent) : QWidget(parent) {
     ThemeEngine::instance().setGlassEnabled(on);
     applyTheme();
   });
+
+  // Refresh the UI when the theme engine changes the palette at runtime
+  // (e.g. preset switch from another page, or accent color change).
+  connect(&ThemeEngine::instance(), &ThemeEngine::themeChanged, this,
+          [this] { refreshFromEngine(); });
   connect(saveBtn, &QPushButton::clicked, this, &ThemePage::exportTheme);
   connect(loadBtn, &QPushButton::clicked, this, &ThemePage::importTheme);
+  connect(resetWorkspaceBtn_, &QPushButton::clicked, this,
+          &ThemePage::workspaceResetRequested);
 
   refreshFromEngine();
+}
+
+void ThemePage::setupWorkspaceLayout(const QStringList& names) {
+  while (QLayoutItem* item = layoutGrid_->takeAt(0))
+    delete item->widget();
+  layoutCards_.clear();
+
+  for (int i = 0; i < names.size(); ++i) {
+    auto* card = new QPushButton(names[i], this);
+    card->setCheckable(true);
+    card->setCursor(Qt::PointingHandCursor);
+    card->setToolTip(i < 4 ? QString::fromUtf8(kLayoutDescriptions[i])
+                           : QString());
+    const int col = i % 2;
+    const int row = i / 2;
+    layoutGrid_->addWidget(card, row, col);
+    layoutCards_.push_back(card);
+    const QString name = names[i];
+    connect(card, &QPushButton::clicked, this,
+            [this, name] { onPresetCardClicked(name); });
+    if (hints_)
+      hints_->registerHint(card, QStringLiteral("Workspace Layout"),
+          QStringLiteral("Switch to this panel arrangement"));
+  }
+  refreshWorkspacePreset(QStringLiteral("Classic"));
+}
+
+void ThemePage::refreshWorkspacePreset(const QString& current) {
+  for (int i = 0; i < layoutCards_.size(); ++i) {
+    const bool active = layoutCards_[i]->text() == current;
+    layoutCards_[i]->setChecked(active);
+  }
+  if (!layoutStatus_)
+    return;
+  if (current == QStringLiteral("Custom")) {
+    layoutStatus_->setText(
+        QStringLiteral("Custom layout \u2014 you rearranged the panels. "
+                       "Pick a preset above to reset the arrangement."));
+    layoutStatus_->setStyleSheet(QStringLiteral("color: %1;")
+                                     .arg(theme::kMeterHot.name()));
+  } else {
+    layoutStatus_->setText(
+        QStringLiteral("%1 \u2014 panels are movable, resizable and "
+                       "floatable in every preset.")
+            .arg(current));
+    layoutStatus_->setStyleSheet(QStringLiteral("color: %1;")
+                                     .arg(theme::kTextDim.name()));
+  }
+}
+
+void ThemePage::onPresetCardClicked(const QString& name) {
+  emit workspacePresetSelected(name);
 }
 
 void ThemePage::refreshFromEngine() {
@@ -175,6 +276,22 @@ void ThemePage::importTheme() {
     return;
   }
   refreshFromEngine();
+}
+
+void ThemePage::attachHints(HintManager* hints) {
+  hints_ = hints;
+hints_->registerHint(presetBox_, QStringLiteral("Theme Preset"),
+                     QStringLiteral("Pick a visual preset; changes apply live"));
+hints_->registerHint(presetBox_, QStringLiteral("Theme Preset"),
+                     QStringLiteral("Pick a visual preset; changes apply live"));
+  hints_->registerHint(accentBtn_, QStringLiteral("Accent Color"),
+                       QStringLiteral("Choose a custom accent color"));
+  hints_->registerHint(glassChk_, QStringLiteral("Glass Surfaces"),
+                       QStringLiteral("Toggle translucent window fills"));
+  hints_->registerHint(preview_, QStringLiteral("Live Preview"),
+                       QStringLiteral("Preview the active theme"));
+  hints_->registerHint(resetWorkspaceBtn_, QStringLiteral("Reset Workspace"),
+                       QStringLiteral("Restore the last layout preset"));
 }
 
 } // namespace misuc::ui

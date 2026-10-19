@@ -3,12 +3,14 @@
 #include <QWidget>
 #include <QString>
 #include <functional>
+#include <vector>
 
 #include <misuc/engine/project/Session.h>
 
 class QScrollArea;
 class QScrollBar;
 class QMouseEvent;
+class QShowEvent;
 
 namespace misuc::ui {
 
@@ -109,15 +111,32 @@ public:
   QString regionId() const { return regionId_; }
   QString regionName() const;
   void refresh(); // repaint from the session
+  // Current vertical pixel offset of the note-grid scroll (0 = highest pitch).
+  int verticalScroll() const { return vbarValue_; }
   void setPlayhead(bool playing, double beats);
   void autoFollow(bool playing, double beats);
 
   void setZoom(double pxPerBeat);
   double zoom() const { return pxPerBeat_; }
+  // Vertical zoom: row height in pixels per semitone (default kRowH=18,
+  // 12..48). Scrolling always spans the full MIDI 0..127 range.
+  void setRowHeight(int rowH);
+  int rowHeight() const { return rowH_; }
   void setSnap(bool on) { snap_ = on; }
   bool snap() const { return snap_; }
+  // Snap-grid resolution in beats (1 beat = a quarter note). 1/16 -> 0.25.
+  // Supported values are those returned by snapBeatsOptions(). 0 disables.
+  void setSnapBeats(double beats) { snapBeats_ = beats; }
+  double snapBeats() const { return snapBeats_; }
+  // The selectable snap resolutions (1/32, 1/16, 1/8, 1/4, 1/2, 1).
+  static std::vector<double> snapBeatsOptions() {
+    return {0.03125, 0.0625, 0.125, 0.25, 0.5, 1.0};
+  }
   // Snaps the selection (or all notes) to the grid; one undo snapshot.
   void quantize();
+  // Velocity tool: nudges the selection's velocities by `delta` (clamped to
+  // 1..127) in one undo snapshot. No-op without a selection.
+  void nudgeVelocity(int delta);
   // Mirror the session's persisted loop region into the ruler.
   void setLoop(bool on, double startBeats, double endBeats);
 
@@ -146,6 +165,7 @@ signals:
 protected:
   void paintEvent(QPaintEvent* e) override;
   QSize sizeHint() const override;
+  void showEvent(QShowEvent* e) override;
 
 private:
   class Canvas;
@@ -173,11 +193,14 @@ private:
   QScrollBar* vbar_ = nullptr;
 
   double pxPerBeat_ = 40.0;
+  int rowH_ = kRowH;
   bool snap_ = true;
+  double snapBeats_ = 0.25;  // 1/16 note, the protocol default grid
   int hbarValue_ = 0;
   int vbarValue_ = 0;
   double playheadBeats_ = -1.0;
   bool playheadPlaying_ = false;
+  bool centerMiddleOnce_ = false; // first show() snaps the view to middle C
 };
 
 } // namespace misuc::ui

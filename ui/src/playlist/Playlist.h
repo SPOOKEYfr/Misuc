@@ -2,8 +2,12 @@
 
 #include <QWidget>
 
+#include <functional>
+#include <vector>
+
 #include <misuc/engine/project/Session.h>
 
+#include "PlaylistSelection.h"
 #include "branding/Icons.h"
 
 class QTimer;
@@ -14,6 +18,23 @@ namespace misuc::ui {
 
 class PlaylistGrid;
 class HintManager;
+
+// Metadata of one effect control port as reported by the engine's effect
+// catalog: its native range + default for building automation lane scales and
+// the display label for the band tag/menu. `index` is the Lv2 control port
+// index ("fx:<chain>:<port>" addresses a lane by it).
+struct FxPortInfo {
+  uint32_t index = 0;
+  float min = 0.0f;
+  float max = 1.0f;
+  float def = 0.0f;
+  QString label;
+};
+
+// Resolves an effect plugin's control ports by URI — provided by the
+// MainWindow from the engine's catalog so the Playlist stays engine-agnostic.
+using FxPortsResolver = std::function<std::vector<FxPortInfo>(
+    const std::string& uri)>;
 
 // Playlist workspace (master spec §12-20, §71): a real arrangement view bound
 // to the Session. Left column = track headers; main area = timeline lanes with
@@ -57,6 +78,7 @@ public:
   void setSnap(bool on);
   void setSongMode(bool song);
   void setToolBrush(bool slice); // slice tool on/off
+  void setPaintTool(bool paint); // paint (brush) tool on/off
   void selectTrack(const QString& id);
   void clearSelection();
 
@@ -66,17 +88,44 @@ public:
   bool hasSelection() const;
   SelectionSummary selectionSummary() const;
 
+  // Selection model access for Edit menu / shortcuts.
+  void selectAll();
+  void deselectAll();
+  int selectionCount() const;
+
   // Real sample insertion (browser drag/drop, import dialog).
   void insertSampleAt(const QString& source, double startBeat, int trackRow);
   void importAudioDialog();
+
+  // Paint brush: get the active clip/region for painting (first selected item).
+  // Returns true if there is an active paint source.
+  bool getActivePaintSource(std::string& outTrackId,
+                            std::string& outClipId,
+                            std::string& outRegionId,
+                            double& outStartBeats,
+                            double& outDurationBeats) const;
 
   // Registers the icon-only toolbar with the global hint manager so hovering
   // any tool surfaces its hint in the HintBar (§78).
   void attachHints(HintManager* hints);
 
+  // Supplies fx control-port metadata (native range/default + label) used by
+  // the automation band to scale and label "fx:<chain>:<port>" lanes, and by
+  // the band's menu to enumerate a plugin's automatable ports.
+  void setFxPortsResolver(FxPortsResolver resolver);
+  std::vector<FxPortInfo> portsForUri(const std::string& uri) const;
+
+  // While an automation point is being dragged on the band, reports the
+  // dragging row, lane index and the point's live value. Used by the record
+  // sweep to tape a band edit at the transport position (Phase Q).
+  bool liveBandDrag(int& row, int& autoIdx, double& value) const;
+
 signals:
   void edited();
   void selectionChanged();
+  // Fired when an automation-point drag ends (right before edited()). Carries
+  // the row + lane index so the app can flush captured band edits.
+  void bandDragFinished(int row, int autoIdx);
   // Always carries the target region id (empty when opening a track without
   // regions), so the piano roll binds to the exact region you clicked.
   void openInPianoRoll(const QString& trackId, const QString& regionId);
@@ -87,17 +136,22 @@ signals:
 protected:
   void keyPressEvent(QKeyEvent* event) override;
 
-private:
+public:
   void applyZoom(double);
+
+private:
 
   misuc::project::Session& s_;
   PlaylistGrid* grid_ = nullptr;
+  PlaylistSelection selection_;
   QSlider* zoom_ = nullptr;
   QToolButton* selBtn_ = nullptr;
   QToolButton* sliceBtn_ = nullptr;
+  QToolButton* paintBtn_ = nullptr;
   QToolButton* snapBtn_ = nullptr;
   QToolButton* addBtn_ = nullptr;
   QToolButton* zoomIcon_ = nullptr;
+  FxPortsResolver fxPortsResolver_;
 };
 
 } // namespace misuc::ui

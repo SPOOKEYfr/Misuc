@@ -81,8 +81,13 @@ private:
   void pushToTokens() const; // write pal_ into the theme::k* globals
 
   Palette pal_;
+  // Last real preset base (never "Custom") a custom accent was layered on.
+  // Persists alongside a custom accent so restart can reconstruct the exact
+  // palette; kept purely in-memory, reset by every adopt() of a real preset.
+  QString basePreset_;
   bool glass_ = true;
   bool firstApply_ = true;
+  bool applying_ = false; // re-entrancy guard: apply() must not nest
 };
 
 } // namespace misuc::ui

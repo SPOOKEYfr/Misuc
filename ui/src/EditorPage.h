@@ -11,9 +11,11 @@ class Session;
 class QListWidget;
 class QSlider;
 class QCheckBox;
+class QComboBox;
 
 namespace misuc::ui {
 
+class HintManager;
 class PianoRoll;
 
 // Editor page: track list on the left, piano-roll editor on the right. Tracks
@@ -41,11 +43,14 @@ public:
   // Public entry point for the Add menu (Add → New Track).
   void addNewTrack() { addTrack(); }
 
-signals:
+  // Registers hints for the editor chrome controls.
+  void attachHints(HintManager* hints);
+
+ signals:
   void edited();
   void trackSelected(const QString& id);
 
-private:
+ private:
   void rebuildTrackList();
   void addTrack();
   void removeTrack();
@@ -53,12 +58,15 @@ private:
   void onSelectionChanged(int row);
   void emitEdited() { emit edited(); }
 
-  misuc::project::Session* session_;
+  misuc::project::Session* session_ = nullptr;
   PianoRoll* piano_ = nullptr;
   QListWidget* trackList_ = nullptr;
   QSlider* zoomSlider_ = nullptr;
+  QSlider* rowHSlider_ = nullptr;
   QCheckBox* snapChk_ = nullptr;
+  QComboBox* snapCombo_ = nullptr;
   QString selectedId_;
+  HintManager* hints_ = nullptr;
 };
 
 } // namespace misuc::ui

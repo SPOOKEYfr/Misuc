@@ -73,6 +73,7 @@ enum class IconId {
   Question,
   Settings,
   Waveform,
+  Refresh,
 };
 
 QIcon make(IconId id, const QColor& color, int size = 18);

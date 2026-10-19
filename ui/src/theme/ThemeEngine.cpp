@@ -152,6 +152,8 @@ void ThemeEngine::setGlassEnabled(bool on) {
 }
 
 void ThemeEngine::adopt(const Palette& p) {
+  if (p.name != QStringLiteral("Custom"))
+    basePreset_ = p.name;
   pal_ = p;
   pal_.accentSoft = blend(pal_.panel, pal_.accent, 48);
   pushToTokens();
@@ -185,7 +187,7 @@ void ThemeEngine::pushToTokens() const {
   theme::kSurface = pal_.panel;
   theme::kSurfaceElevated = pal_.panelRaised;
   theme::kSurfaceGlassStrong = QColor(pal_.glass);
-  theme::kSurfaceGlassStrong.setAlpha(235);
+  theme::kSurfaceGlassStrong.setAlpha(255);
   theme::kBorderSubtle = QColor(pal_.border);
   theme::kBorderSubtle.setAlpha(150);
   theme::kTextSecondary = blend(pal_.text, pal_.textDim, 92);
@@ -208,13 +210,16 @@ void ThemeEngine::pushToTokens() const {
   theme::kBorderStrong = pal_.borderBright;
 
   // Matte-glass chrome layer: near-black base with a faint accent undertone,
-  // translucent matte charcoals for every chrome surface. Composited over the
-  // base by Qt's backing store, so glass reads on any GPU.
+  // matte charcoals for every chrome surface. The fills are fully opaque so a
+  // live resize repaints each surface in a single pass; the "glass" identity
+  // is carried by the top glow line and the border/border-highlight cues, not
+  // by translucent fills (translucent fills force a second composite blend on
+  // every resize frame — a direct flicker/ghosting root cause).
   theme::kBackdrop = blend(pal_.background, pal_.accent, 10);
   theme::kChrome = QColor(pal_.panel);
-  theme::kChrome.setAlpha(226);
+  theme::kChrome.setAlpha(255);
   theme::kChromeRaised = QColor(pal_.panelRaised);
-  theme::kChromeRaised.setAlpha(234);
+  theme::kChromeRaised.setAlpha(255);
   theme::kChromeBorder = QColor(pal_.borderBright);
   theme::kChromeBorder.setAlpha(92);
   theme::kChromeGlowTop = QColor(255, 255, 255, 20);
@@ -403,6 +408,14 @@ QString ThemeEngine::glassPanelStyle(bool glassLine) const {
 }
 
 void ThemeEngine::apply(QApplication& app) {
+  // Re-entrancy guard. apply() sets a fresh palette + stylesheet, and that
+  // synchronously propagates palette-change events to every widget; a nested
+  // apply() (e.g. ThemePage::refreshFromEngine reacting to palette events)
+  // would re-trigger the same propagation forever. Early-out keeps the outer
+  // call in charge and the tree settled once.
+  if (applying_)
+    return;
+  applying_ = true;
   QPalette pal = app.palette();
   pal.setColor(QPalette::Window, theme::kBackdrop);
   pal.setColor(QPalette::WindowText, theme::kText);
@@ -419,10 +432,12 @@ void ThemeEngine::apply(QApplication& app) {
   app.setPalette(pal);
   app.setStyleSheet(buildStyleSheet());
   if (firstApply_) {
+    applying_ = false;
     firstApply_ = false;
     return; // startup; widgets don't exist yet to notify
   }
   emit themeChanged();
+  applying_ = false;
 }
 
 QByteArray ThemeEngine::toJson() const {
@@ -518,21 +533,42 @@ void ThemeEngine::loadPersisted() {
   QString preset = stored;
   if (preset.isEmpty() || preset == QStringLiteral("Misuc Graphite"))
     preset = QStringLiteral("Misuc Black"); // legacy navy default migrated
+  // A custom accent was previously persisted as the pseudo-preset "Custom"
+  // with no record of the base palette it was built on. Older builds could
+  // never restore it (setPreset("Custom") failed), so custom accents silently
+  // reset on restart. Reconstruct the base, re-apply the stored accent, and
+  // rewrite the card in the current format so it self-heals.
+  if (preset == QStringLiteral("Custom"))
+    preset = basePreset_.isEmpty() ? QStringLiteral("Misuc Black")
+                                   : basePreset_;
   const QString accentHex = s.value(QStringLiteral("theme/accent")).toString();
-  if (!preset.isEmpty() && setPreset(preset)) {
+  if (setPreset(preset)) {
+    bool custom = false;
     if (!accentHex.isEmpty()) {
       const QColor c(accentHex);
       if (c.isValid()) {
         pal_.accent = c;
-        adopt(pal_);
+        pal_.name = QStringLiteral("Custom");
+        custom = true;
       }
     }
+    if (custom)
+      adopt(pal_);
+    savePersisted(); // normalize the stored card (custom base + accent)
   }
 }
 
 void ThemeEngine::savePersisted() const {
   QSettings s;
-  s.setValue(QStringLiteral("theme/preset"), pal_.name);
+  // Persist the real base preset plus an optional accent overlay, so a custom
+  // accent is fully restorable on the next launch (a plain "Custom" string
+  // could not be reconstructed). theme/preset stays the base; theme/accent
+  // carries the overlay only when a custom accent is in effect.
+  const QString base =
+      pal_.name == QStringLiteral("Custom") && !basePreset_.isEmpty()
+          ? basePreset_
+          : pal_.name;
+  s.setValue(QStringLiteral("theme/preset"), base);
   if (pal_.name == QStringLiteral("Custom"))
     s.setValue(QStringLiteral("theme/accent"), pal_.accent.name());
   else

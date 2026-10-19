@@ -47,8 +47,11 @@ public:
 signals:
   // A workspace-strip icon was clicked; MainWindow routes it to the workspace.
   void workspaceIconClicked(const QString& workspaceId);
+  // The logo was clicked; MainWindow opens the project setup page.
+  void projectRequested();
 
 private:
+  bool eventFilter(QObject* watched, QEvent* event) override;
   QWidget* buildLeftCluster();
   QWidget* buildCenterTransport();
   QWidget* buildWorkspaceStrip();
@@ -57,6 +60,10 @@ private:
   void refreshLogo();
   QToolButton* stripButton(const QString& id, icons::IconId icon);
   void syncStripIcons();
+  // Applies the status-cluster label colors only when they actually change
+  // (state transitions / theme changes), so the 30 Hz UI poll never re-polishes
+  // any QSS — a genuine repaint-storm root cause during live resize.
+  void syncStatusColors();
 
   misuc::engine::AudioEngine& engine_;
   QLabel* navLogo_ = nullptr;
@@ -75,6 +82,7 @@ private:
   long clockTicks_ = 100;
   QElapsedTimer cpuTimer_;
   uint64_t cpuLastJiffies_ = 0;
+  QHash<const QLabel*, QColor> statusColorCache_;
 };
 
 } // namespace misuc::ui

@@ -6,8 +6,10 @@
 #include <QFileInfo>
 #include <QLabel>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QHBoxLayout>
 #include <QMessageBox>
+#include <QVariant>
 #include <QVBoxLayout>
 #include <QListWidget>
 #include <QPushButton>
@@ -18,6 +20,7 @@
 
 #include "PianoRoll.h"
 #include "Theme.h"
+#include "HintSystem.h"
 
 using misuc::project::Session;
 using misuc::project::Track;
@@ -57,7 +60,9 @@ EditorPage::EditorPage(Session& session, QWidget* parent)
   trackCol->addWidget(trackHead);
 
   auto* addBtn = new QPushButton(QStringLiteral("+ Add Track"), this);
-  addBtn->setObjectName(QStringLiteral("smallButton"));
+  addBtn->setObjectName(QStringLiteral("addTrackBtn"));
+  addBtn->setIcon(icons::make(icons::IconId::Add, theme::kText, 14));
+  addBtn->setIconSize(QSize(14, 14));
   connect(addBtn, &QPushButton::clicked, this, [this] { addTrack(); });
   trackCol->addWidget(addBtn);
 
@@ -73,7 +78,9 @@ EditorPage::EditorPage(Session& session, QWidget* parent)
   trackCol->addWidget(trackList_, 1);
 
   auto* removeBtn = new QPushButton(QStringLiteral("Remove Selected"), this);
-  removeBtn->setObjectName(QStringLiteral("smallButton"));
+  removeBtn->setObjectName(QStringLiteral("removeTrackBtn"));
+  removeBtn->setIcon(icons::make(icons::IconId::Remove, theme::kText, 14));
+  removeBtn->setIconSize(QSize(14, 14));
   connect(removeBtn, &QPushButton::clicked, this, [this] { removeTrack(); });
   trackCol->addWidget(removeBtn);
 
@@ -89,25 +96,58 @@ EditorPage::EditorPage(Session& session, QWidget* parent)
   zoomLabel->setStyleSheet(
       QStringLiteral("color: %1;").arg(theme::kTextDim.name()));
   zoomSlider_ = new QSlider(Qt::Horizontal, this);
+  zoomSlider_->setObjectName(QStringLiteral("editorZoom"));
   zoomSlider_->setRange(10, 160);
   zoomSlider_->setValue(40);
   zoomSlider_->setFixedWidth(180);
-  snapChk_ = new QCheckBox(QStringLiteral("Snap 1/16"), this);
+  snapChk_ = new QCheckBox(QStringLiteral("Snap"), this);
+  snapChk_->setObjectName(QStringLiteral("editorSnapChk"));
   snapChk_->setChecked(true);
+  snapCombo_ = new QComboBox(this);
+  snapCombo_->setObjectName(QStringLiteral("editorSnapCombo"));
+  for (const double sb : PianoRoll::snapBeatsOptions())
+    snapCombo_->addItem(QStringLiteral("1/%1").arg(static_cast<int>(1.0 / sb)),
+                        QVariant::fromValue(sb));
+  snapCombo_->setCurrentIndex(2); // 1/16
+  snapCombo_->setFocusPolicy(Qt::NoFocus);
+  connect(snapChk_, &QCheckBox::toggled, this,
+          [this](bool on) { piano_->setSnap(on); });
+  connect(snapCombo_, &QComboBox::activated, this, [this](int i) {
+    const double sb = snapCombo_->itemData(i).toDouble();
+    piano_->setSnapBeats(sb);
+    snapChk_->setChecked(true);
+  });
+  rowHSlider_ = new QSlider(Qt::Horizontal, this);
+  rowHSlider_->setObjectName(QStringLiteral("editorRowHeight"));
+  rowHSlider_->setRange(12, 48);
+  rowHSlider_->setValue(18);
+  rowHSlider_->setFixedWidth(140);
+  auto* rowHLabel = new QLabel(QStringLiteral("Rows"), this);
+  rowHLabel->setStyleSheet(
+      QStringLiteral("color: %1;").arg(theme::kTextDim.name()));
   connect(zoomSlider_, &QSlider::valueChanged, this, [this](int v) {
     piano_->setZoom(static_cast<double>(v));
   });
-  connect(snapChk_, &QCheckBox::toggled, this,
-          [this](bool on) { piano_->setSnap(on); });
+  connect(rowHSlider_, &QSlider::valueChanged, this,
+          [this](int v) { piano_->setRowHeight(v); });
   auto* quantizeBtn = new QPushButton(QStringLiteral("Quantize"), this);
+  quantizeBtn->setObjectName(QStringLiteral("quantizeBtn"));
+  quantizeBtn->setIcon(icons::make(icons::IconId::Snap, theme::kText, 14));
+  quantizeBtn->setIconSize(QSize(14, 14));
   connect(quantizeBtn, &QPushButton::clicked, this, [this] {
     piano_->quantize();
   });
   auto* importBtn = new QPushButton(QStringLiteral("Import Audio\u2026"), this);
+  importBtn->setObjectName(QStringLiteral("importAudioBtn"));
+  importBtn->setIcon(icons::make(icons::IconId::Folder, theme::kText, 14));
+  importBtn->setIconSize(QSize(14, 14));
   connect(importBtn, &QPushButton::clicked, this, &EditorPage::importAudio);
   toolbar->addWidget(zoomLabel);
   toolbar->addWidget(zoomSlider_);
+  toolbar->addWidget(rowHLabel);
+  toolbar->addWidget(rowHSlider_);
   toolbar->addWidget(snapChk_);
+  toolbar->addWidget(snapCombo_);
   toolbar->addWidget(quantizeBtn);
   toolbar->addWidget(importBtn);
   toolbar->addStretch();
@@ -144,7 +184,7 @@ void EditorPage::rebuildTrackList() {
     item->setData(Qt::UserRole, QString::fromStdString(t.id));
     trackList_->addItem(item);
 
-    auto* rowW = new QWidget(trackList_);
+    auto* rowW = new QWidget();
     auto* lay = new QHBoxLayout(rowW);
     lay->setContentsMargins(10, 6, 10, 6);
     lay->setSpacing(10);
@@ -278,6 +318,76 @@ void EditorPage::onSelectionChanged(int row) {
   selectedId_ = id;
   piano_->setTrack(id);
   emit trackSelected(id);
+}
+
+void EditorPage::attachHints(HintManager* hints) {
+  hints_ = hints;
+  if (!hints)
+    return;
+  const QPointer<EditorPage> self(this);
+  auto* addBtn = findChild<QPushButton*>(QStringLiteral("addTrackBtn"));
+  if (addBtn)
+    hints->registerTool(addBtn, QStringLiteral("Add Track"),
+                        QStringLiteral("Append a new MIDI track and select it"),
+                        QString(), icons::IconId::Add);
+  auto* removeBtn = findChild<QPushButton*>(QStringLiteral("removeTrackBtn"));
+  if (removeBtn)
+    hints->registerTool(removeBtn, QStringLiteral("Remove Selected"),
+                        QStringLiteral("Delete the selected track, its clips "
+                                       "and its rack channel"), QString(),
+                        icons::IconId::Remove);
+  if (trackList_)
+    hints->registerTool(trackList_, QStringLiteral("Track List"),
+                        QStringLiteral("Select the track the piano roll draws "
+                                       "and edits"), QString(), icons::IconId::PianoRoll);
+  if (zoomSlider_)
+    hints->registerTool(zoomSlider_, QStringLiteral("Editor Zoom"),
+                        QStringLiteral("Horizontal zoom of the piano roll grid"),
+                        QString(), icons::IconId::ZoomIn,
+                        [self]() -> QString {
+                          if (self.isNull() || !self->zoomSlider_)
+                            return QString();
+                          return QStringLiteral("%1%").arg(self->zoomSlider_->value());
+                        });
+  if (rowHSlider_)
+    hints->registerTool(rowHSlider_, QStringLiteral("Piano Roll Row Height"),
+                        QStringLiteral("Vertical height of the note rows"),
+                        QString(), icons::IconId::ZoomIn,
+                        [self]() -> QString {
+                          if (self.isNull() || !self->rowHSlider_)
+                            return QString();
+                          return QStringLiteral("%1 px").arg(self->rowHSlider_->value());
+                        });
+  if (snapChk_)
+    hints->registerTool(snapChk_, QStringLiteral("Snap"),
+                        QStringLiteral("Constrain note drags and quantize to "
+                                       "the selected grid"), QString(),
+                        icons::IconId::Snap,
+                        [self]() -> QString {
+                          if (self.isNull() || !self->snapChk_) return QString();
+                          return self->snapChk_->isChecked() ? QStringLiteral("on")
+                                                             : QStringLiteral("off");
+                        });
+  if (snapCombo_)
+    hints->registerTool(snapCombo_, QStringLiteral("Grid"),
+                        QStringLiteral("Grid resolution for snap and quantize"),
+                        QString(), icons::IconId::Snap,
+                        [self]() -> QString {
+                          if (self.isNull() || !self->snapCombo_) return QString();
+                          return self->snapCombo_->currentText();
+                        });
+  auto* quantize = findChild<QPushButton*>(QStringLiteral("quantizeBtn"));
+  if (quantize)
+    hints->registerTool(quantize, QStringLiteral("Quantize"),
+                        QStringLiteral("Snap the selection's note starts to "
+                                       "the active grid"), QString(),
+                        icons::IconId::Snap);
+  auto* importBtn = findChild<QPushButton*>(QStringLiteral("importAudioBtn"));
+  if (importBtn)
+    hints->registerTool(importBtn, QStringLiteral("Import Audio"),
+                        QStringLiteral("Import an audio file as a sample on "
+                                       "the selected track"), QString(),
+                        icons::IconId::Folder);
 }
 
 } // namespace misuc::ui

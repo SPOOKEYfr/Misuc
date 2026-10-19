@@ -1,84 +1,253 @@
 MISUC USER GUIDE
 ================
 
-Misuc is a Linux DAW. This guide walks through the real, working features in
-order, so you can go from empty project to a finished arrangement.
+Misuc is a Linux DAW: multi-track MIDI sequencing, audio clips, step
+patterns, mixing with buses/sends/effects, and FL Studio (FLP) import.
+This guide walks through every real, working feature in order - from an
+empty project to a finished arrangement.
 
-1. STARTUP / DEMO
------------------
-The first launch opens the bundled demo project (File > New Demo Project…
-reopens it at any time). The audio backend starts automatically at launch
-(48 kHz, 256 frames on your first output device). If no device is available the
-engine stays off and the status bar says so — check Tools > Audio Console,
-press "Open Device".
+---------------------------------------------------------------
+1. QUICK START
+---------------------------------------------------------------
+- On first launch Misuc opens the bundled demo project. Reopen it any
+  time with File > New Demo Project...
+- The audio backend starts automatically at launch (48 kHz on your
+  default PipeWire output device). If no device is available the engine
+  stays off and the status bar says so - open Tools > Audio Console and
+  press "Open Device".
 
-2. THE FOUR WORKSPACES
-----------------------
-  Playlist (F5)     - the arrangement editor: audio clips + MIDI regions.
+Controls you will use constantly:
+  Space ........ play / stop
+  R ............. record
+  L ............. loop toggle
+  N ............. snap-to-grid toggle (Playlist)
+  Ctrl+Z / Ctrl+Y  undo / redo
+  Ctrl+S ......... save, Ctrl+Shift+S save as
+  Ctrl+E ......... export audio
+  F5 / F6 / F7 / F8 / F9 ... Playlist / Channel Rack / Piano Roll /
+                            Browser / Mixer workspaces
+  Ctrl+Shift+I ... Inspector panel
+
+---------------------------------------------------------------
+2. THE WORKSPACES
+---------------------------------------------------------------
+  Playlist (F5)     - the arrangement: audio clips + MIDI regions.
   Channel Rack (F6) - the step sequencer / pattern editor.
-  Piano Roll (F7)   - the MIDI editor bound to the selected track's region.
-  Browser (F8)      - samples, project audio, instruments, effects, plugins.
-  Mixer (F9)        - per-track gain, pan, mute, solo and live meters.
+  Piano Roll (F7)   - the MIDI note editor for a selected region.
+  Browser (F8)      - samples, project audio, sounds library, packs.
+  Mixer (F9)        - per-track and per-bus channel strips.
 
-3. PATTERNS -> ARRANGEMENT (the recommended workflow)
-----------------------------------------------------
-1. Open the Channel Rack (F6), pick an instrument, and tap in up to 16 steps.
-2. Press "Place Pattern" (or the square pattern button) — Misuc materializes
-   the rack into a real MIDI region ("Pattern N") on a Sequencer track, on the
-   song grid, and switches to the Playlist.
-3. Repeat to build more Patterns. In the Playlist you can:
-   - click the ruler to move the playhead,
-   - drag a region to move it, drag its edge to resize or trim,
-   - right-click a region for Rename / Duplicate / Slice Here / Open in Piano
-     Roll / Delete,
-   - Space to Play / Stop, R to Record.
-4. Play! The transport resumes from the playhead; the ruler and both editors
-   follow the caret.
+All workspaces live in the central tab bar. Every tab is navigable from
+the keyboard (see section 10).
 
-4. PIANO ROLL (F7)
-------------------
-Select a track (or open a region from the Playlist context menu). The grid
-covers the full MIDI range 0..127 with the velocity lane underneath.
-Left-click the grid = add a note; drag a note to move/resize it; drag in the
-velocity lane to shape velocity; the piano keys on the left audition notes as
-you hover. Clicking the ruler above the grid seeks. If a track has no region
-yet, the first note you draw auto-creates one ("MIDI 1").
+---------------------------------------------------------------
+3. TRACKS, CLIPS AND REGIONS IN THE PLAYLIST
+---------------------------------------------------------------
+The Playlist is your timeline. The left column lists your tracks; each
+track owns its timeline.
 
-5. CHANNEL RACK (F6)
---------------------
-Choose a pattern instrument and a bank of up to 16 steps. Each gated step
-becomes a real note when you press Place Pattern. "Reset" clears the steps.
+  - Click the ruler to move the playhead; drag on the ruler to scrub.
+    With snap ON the playhead snaps to the grid.
+  - Add: Add > New Track, or right-click a track label > "Add Track".
+  - Import audio: Add > Import Audio..., or drag an audio file from the
+    Browser / file manager / FLP into the Playlist or Channel Rack.
+  - A track holds two kinds of items:
+      Audio clips   - dragged / imported audio.
+      MIDI regions  - created from the Channel Rack (see section 4),
+                      or from File > "Place Pattern"-style commands.
+  - Drag a region or clip to move it in time. Drag its left/right edge
+    to resize or trim. Ctrl+wheel (or the toolbar zoom slider) zooms
+    horizontally.
+  - Right-click an item for: Rename, Duplicate, Slice Here,
+    Split at Playhead, Open in Piano Roll (regions), Mute (clips),
+    Move to Track Above / Below, Delete.
 
-6. BROWSER (F8)
----------------
-The top-left tree categorises content:
-  All Samples / Current Project - real audio found in your Music, Samples and
-                                  Sounds folders (and the live project clips).
-  Instruments / Audio Effects / MIDI / Plugins - built-in studio content.
-Select an audio file to load a real preview (channels, sample rate, length).
-Press the audition (preview) button to play the actual sample file through the
-engine; press + to drop it into the Playlist as an audio clip; or drag the row
-straight onto the grid. Use "Scan Sample Pack Folder…" to add any extra folder
-of samples.
+Keyboard in the Playlist:
+  Ctrl+X / Ctrl+C / Ctrl+V .... cut / copy / paste items
+  Ctrl+D ..................... duplicate in place
+  Delete / Backspace ......... delete selection
+  Ctrl+A / Escape ............. select all / deselect
+  Ctrl+UP / Ctrl+DOWN ........ move the selected patterns/clips to the
+                              track above / below (same timeline time)
+  Arrow keys / Page Up-Down ... scroll the arrangement vertically
+  Left / Right arrows ......... scroll horizontally
+  Home / End .................. scroll to the start / end of the song
+  Ctrl+Home / Ctrl+End ........ scroll to the first / last track
 
-7. RECORDING (R)
-----------------
-Press R (or the red record button) to arm. Misuc starts the transport at the
-recording start and captures live input. Press R again to stop: the take is
-staged next to your project and placed as a new audio clip on the selected
-track at the exact beat it started.
+---------------------------------------------------------------
+4. CHANNEL RACK -> PATTERN -> ARRANGEMENT
+---------------------------------------------------------------
+The recommended workflow:
 
-8. GRID, METRONOME, MODES
--------------------------
-  N           - snap to grid on/off.
-  M           - metronome + two-bar count-in on/off.
-  Song/Pattern mode toggles how the playlist lay out edits.
+1. Open the Channel Rack (F6), pick an instrument channel, and tap in
+   up to 16 steps with the pattern.
+2. Materialize that pattern as a real MIDI region ("Pattern N") on the
+   song grid - the Channel Rack's pattern button does this. The region
+   lands on a Sequencer track in the Playlist.
+3. Repeat to build more patterns, then arrange them in the Playlist:
+   drag regions in time, resize their edges, duplicate with right-click
+   or Ctrl+D, and move any pattern to another track with right-click
+   "Move to Track Above/Below" or Ctrl+Up / Ctrl+Down.
+4. Double-click "Open in Piano Roll" on any region to edit its notes.
 
-9. PROJECTS
------------
-File > New, Open (a .misuc project with regions and clips), Save/Save As.
-Export WAV renders the full arrangement offline to a file, then restores your
-audio device. The project file stores patterns as real MIDI regions.
+Patterns stay per-track and per-slot; moving them between tracks keeps
+every note and its timeline position.
 
-All keyboard shortcuts and commands are also visible in the Hint Bar at the
-bottom of the window as you move the mouse.
+---------------------------------------------------------------
+5. PIANO ROLL (F7)
+---------------------------------------------------------------
+The Piano Roll edits the MIDI notes of the currently selected region
+ (select a region in the Playlist, or choose Patterns > Piano Roll).
+ The note grid spans the full MIDI range but opens centered on middle C,
+ so the C1..C7 keyboard is in view; scroll up/down for extremes.
+ 
+   - Click/drag on the grid to draw notes; drag notes to move them;
+    drag a note's right edge to change length. Right-click erases.
+  - Snap-to-grid is ON by default (1/16 notes) and follows the same
+    toggle as everywhere else. Hold Shift to bypass snap while editing.
+  - The ruler shows bars and beats; a loop band turns the loop on/off.
+  - Playhead auto-follows playback; the caret scrolls the editor.
+  - Quantize and velocity nudges are available from the editor toolbar.
+  - Automation is drawn in the Playlist (see section 8).
+
+---------------------------------------------------------------
+6. BROWSER (F8) - SAMPLES, SOUNDS AND PACKS
+---------------------------------------------------------------
+The Browser is your resources panel. The left column holds the
+categories; the right side lists matching audio files with an async
+waveform thumbnail per row; the bottom strip previews audio.
+
+  - All Samples ..... every indexed location at once.
+  - Sounds .......... the guaranteed Misuc Sounds library (a seeded,
+                      filesystem-backed folder under app data) plus your
+                      home Sounds and Samples folders. Right-click the
+                      node for "Refresh Sounds Library".
+  - Current Project . audio sources already used in this project.
+  - Favourites / Recent . persisted rows you starred / used.
+  - Packs .......... sample packs you indexed, plus kits auto-discovered
+                      under ~/Downloads-style shared folders. Right-click
+                      the Packs node for "Scan Sample Pack Folder...".
+
+  - Single-click a file to audition it (Play/Pause/Stop + volume in the
+    preview strip). Drag a file into the Channel Rack to create a
+    sampler channel, or into the Playlist to create a real audio clip.
+  - Search box filters across the whole index (all locations + packs +
+    favourites/recent) by filename.
+  - Waveform thumbnails are computed in the background on a small worker
+    pool, so browsing a huge pack never freezes the machine.
+
+Note: on first launch Misuc indexes packs it discovers (including kits
+on a shared Windows partition). It starts on "Current Project" so app
+startup stays instant; browse a category when you want to scan it.
+
+---------------------------------------------------------------
+7. MIXER (F9) - FADERS, BUSES, SENDS AND FX
+---------------------------------------------------------------
+Each channel and each bus gets a real strip:
+
+  - Fader (gain), Pan, Mute, Solo, and live peak/RMS meters.
+  - Track strips feed their end-of-chain signal onwards; every track's
+    post-fader signal is added to its routing targets.
+
+Buses - the routing graph:
+  - Every bus has a routing combo (on the bus strip). Pick the target
+    any bus adds itself to (including the MASTER) to build split /
+    parallel architectures:
+      Track -> Bus A -> Bus B -> MASTER
+      Track -> (Bus A and Bus B in parallel) -> MASTER
+  - The graph is compiled cycle-safe: a bus routing into itself or into
+    its own upstream is rescued to MASTER automatically, so routing can
+    never deadlock the realtime engine.
+  - Deleting a bus cleans up sends and routes that referenced it.
+
+Sends - parallel signal:
+  - Open the sends dialog (the Sends/Route button on a track) to add
+    parallel sends: pick a target bus and a send level.
+  - Sends are per-track, additive, and updated live. A send follows its
+    source's mute/solo, and its level is smoothed per sample (no zipper
+    noise).
+
+Bus FX + sidechain:
+  - Each bus can carry its own chain of inserts (Bus FX button).
+  - A built-in sidechain-capable compressor is available
+    (builtin:sc-compressor). Route a source to the bus and pick that
+    source as the sidechain input: the compressor ducks the bus by the
+    sidechain signal in real time.
+  - Track inserts can be either the built-in EQ/Compressor or any
+    discovered LV2 effect on your system (see section 9).
+
+---------------------------------------------------------------
+8. AUTOMATION
+---------------------------------------------------------------
+Every track has an automation band at the bottom of its lane in the
+Playlist.
+
+  - Right-click the band to choose the parameter: Gain, Volume, Pan, or
+    any visible control port of the track's insert effects.
+  - Drag the band to draw/edit points; right-click a point to remove it.
+  - To record automation live: arm the lane, press Play + Record, and
+    move the fader/pan/rack control; the lane tapes the exact values as
+    you drive them.
+  - Band edits and recording collapse into single undo steps.
+
+---------------------------------------------------------------
+9. EFFECTS AND INSTRUMENTS (LV2)
+---------------------------------------------------------------
+Misuc hosts LV2 plugins (via lilv) in addition to its built-ins.
+
+  - Add a track effect: in the Inspector (Ctrl+Shift+I) pick the track,
+    choose an effect from the "Add Insert" combo (built-in EQ, built-in
+    compressor, and every LV2 effect installed on your system), then
+    press Add. Its controls appear in the Inspector; control moves can
+    be automated from the Playlist band.
+  - Bus effects: on the Mixer, each bus's "Bus FX" dialog holds its own
+    chain (including the sidechain compressor).
+  - Instrument source in the Signal Chain: the built-in sampler/demo
+    sounds plus audio clips. Audio effects are insertable on any track
+    or bus.
+  - To use new plugins, install LV2 bundles (for example .lv2 bundles
+    under ~/.lv2 or /usr/lib/lv2) and restart Misuc - discovered plugins
+    appear in the Insert catalog automatically.
+
+(Note: VST/VST3 hosting is not yet available in this build. FLP import
+handles phrases/patterns/notes and channel rack roughly from FL
+projects, preserving sampler channels with a warning.)
+
+---------------------------------------------------------------
+10. KEYBOARD NAVIGATION CHEAT SHEET
+---------------------------------------------------------------
+Workspaces ........ F5 Playlist / F6 Channel Rack / F7 Piano Roll /
+                    F8 Browser / F9 Mixer / Ctrl+Shift+I Inspector
+Transport .......... Space play/stop  R record  L loop
+Snap .............. N (Playlist), Snap to Grid (Edit + Options menus)
+Playlist scroll ... arrows (both axes), Page Up/Down, Home/End,
+                    Ctrl+Home/Ctrl+End
+Move patterns ...... Ctrl+Up / Ctrl+Down (or right-click > Move to Track)
+Editing ............ Ctrl+X/C/V/D, Delete, Ctrl+A, Escape
+Zoom ............... Ctrl+wheel or the Playlist zoom slider
+Import FLP ......... Tools > Import FLP...
+Audio device ....... Tools > Audio Console / Options > Audio Settings
+Export ............. File > Export Audio... (Ctrl+E)
+
+---------------------------------------------------------------
+11. PROJECT FILES AND RECOVERY
+---------------------------------------------------------------
+- Auto-save snapshots a dirty project on a regular interval (default
+  90 s). On a crash, the next start offers to recover the snapshot.
+- Save As / Open / Open Recent are under File. Import FL Studio projects
+  via Tools > Import FLP.... Exported audio renders the full mix with
+  the current routing, send levels, effects and automation.
+
+---------------------------------------------------------------
+12. TROUBLESHOOTING
+---------------------------------------------------------------
+- No sound / engine off: Tools > Audio Console > "Open Device". Check
+  the PipeWire/Pulse sink is not muted or suspended.
+- Stuttering during heavy browsing: waveforms are throttled to two
+  background threads; give a big pack scan a moment on first visit.
+- A stale device (no current audio backend) disables export until a
+  device is opened.
+- Any doubt: restart Misuc - state and recovery are persisted.
+
+This guide documents the shipped feature set. Use the demos and the
+browser to audition everything described here.

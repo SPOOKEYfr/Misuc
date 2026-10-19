@@ -20,13 +20,22 @@ public:
 
   void setCountInOn(bool on);
   bool countInOn() const { return countIn_; }
+  void setMetronomeVolume(float v);
+  float metronomeVolume() const { return metronomeVol_; }
+  void setCountInBeats(float b);
+  float countInBeats() const { return countInBeats_; }
   void setLoopOn(bool on);
-  void setRecording(bool on) { recording_ = on; update(); }
+  void setRecordingState(bool on) { recording_ = on; update(); }
+  bool isRecordingState() const { return recording_; }
   void setSnapOn(bool on);
   void setSongMode(bool song);
   bool snapOn() const { return snap_; }
   bool songMode() const { return songMode_; }
   void refresh(); // pull playhead + tempo state
+
+  // Painted control hit-tests (for UI-driven tests of the toolbar buttons).
+  QRectF recordButtonRect() const { return recordBtn_; }
+  QRectF metronomeButtonRect() const { return clickBtn_; }
 
   // Hover-intent hints for the painted controls (§78: fully developed hint bar).
   void attachHints(HintManager* hints);
@@ -38,13 +47,17 @@ signals:
   void tempoChanged(double bpm);
   void countInToggled(bool on);
   void loopToggled(bool on);
-  void recordToggled(bool on);
+  void recordRequested();      // Request to open Record Setup dialog
+  void recordStateChanged(bool recording); // Recording transport state
   void snapToggled(bool on);
   void modeToggled(bool song);
+  void metronomeVolumeChanged(float volume);
+  void countInBeatsChanged(float beats);
 
 protected:
   void paintEvent(QPaintEvent* event) override;
   void mousePressEvent(QMouseEvent* event) override;
+  void wheelEvent(QWheelEvent* event) override;
 
 private:
   QRectF buttonRect(const QRectF& playRect, int index) const;
@@ -52,6 +65,8 @@ private:
   misuc::engine::AudioEngine& engine_;
   bool playing_ = false;
   bool countIn_ = false;
+  float metronomeVol_ = 0.9f;
+  float countInBeats_ = 2.0f;
   bool loopOn_ = false;
   bool recording_ = false;
   bool snap_ = true;

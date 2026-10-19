@@ -1,8 +1,10 @@
 #include "ChannelStrip.h"
 
+#include <QComboBox>
 #include <QHBoxLayout>
 #include <QMouseEvent>
 #include <QPointer>
+#include <QSignalBlocker>
 #include <QLabel>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -52,20 +54,58 @@ ChannelStrip::ChannelStrip(const QString& id, QWidget* parent)
   knob_->setTitle(QStringLiteral("PAN"));
   lay->addWidget(knob_, 0, Qt::AlignHCenter);
 
-  // Mute / solo.
+  // Mute / solo / record-arm.
   auto* ms = new QHBoxLayout();
   ms->setSpacing(4);
   muteBtn_ = new QPushButton(QStringLiteral("M"), this);
   soloBtn_ = new QPushButton(QStringLiteral("S"), this);
-  for (QPushButton* b : {muteBtn_, soloBtn_}) {
+  armBtn_ = new QPushButton(QStringLiteral("R"), this);
+  for (QPushButton* b : {muteBtn_, soloBtn_, armBtn_}) {
     b->setCheckable(true);
-    b->setFixedSize(26, 24);
+    b->setFixedSize(20, 24);
     b->setCursor(Qt::PointingHandCursor);
     b->setFont(theme::monoFont(8));
   }
+  armBtn_->setObjectName(QStringLiteral("arm_") + id_);
+  armBtn_->setToolTip(QStringLiteral("Arm this track for input recording; the "
+                                     "recorded clip lands here"));
   ms->addWidget(muteBtn_);
   ms->addWidget(soloBtn_);
+  ms->addWidget(armBtn_);
   lay->addLayout(ms);
+
+  // Routing selector: MASTER plus one entry per bus.
+  routeCombo_ = new QComboBox(this);
+  routeCombo_->setFixedHeight(20);
+  routeCombo_->setCursor(Qt::PointingHandCursor);
+  routeCombo_->setToolTip(QStringLiteral("Route: master output or a bus"));
+  connect(routeCombo_, qOverload<int>(&QComboBox::currentIndexChanged), this,
+          [this](int index) { emit routeChanged(id_, index - 1); });
+  lay->addWidget(routeCombo_);
+
+  // Auxiliary controls: parallel sends (every strip) and bus FX (only buses).
+  auto* auxRow = new QHBoxLayout();
+  auxRow->setSpacing(4);
+  sendsBtn_ = new QPushButton(QStringLiteral("↗"), this);
+  sendsBtn_->setFixedSize(20, 18);
+  sendsBtn_->setCursor(Qt::PointingHandCursor);
+  sendsBtn_->setFont(theme::monoFont(8));
+  sendsBtn_->setToolTip(QStringLiteral("Sends: parallel aux/duck taps to buses"));
+  fxBtn_ = new QPushButton(QStringLiteral("FX"), this);
+  fxBtn_->setFixedSize(24, 18);
+  fxBtn_->setCursor(Qt::PointingHandCursor);
+  fxBtn_->setFont(theme::monoFont(8));
+  fxBtn_->setToolTip(QStringLiteral("Bus FX: insert chain on this subgroup"));
+  fxBtn_->hide();
+  connect(sendsBtn_, &QPushButton::clicked, this,
+          [this] { emit sendsRequested(id_); });
+  connect(fxBtn_, &QPushButton::clicked, this,
+          [this] { emit fxRequested(id_); });
+  auxRow->addStretch();
+  auxRow->addWidget(sendsBtn_);
+  auxRow->addWidget(fxBtn_);
+  auxRow->addStretch();
+  lay->addLayout(auxRow);
 
   // Meter.
   meter_ = new VerticalMeter(this);
@@ -92,6 +132,8 @@ ChannelStrip::ChannelStrip(const QString& id, QWidget* parent)
           [this](bool on) { emit muteToggled(id_, on); });
   connect(soloBtn_, &QPushButton::toggled, this,
           [this](bool on) { emit soloToggled(id_, on); });
+  connect(armBtn_, &QPushButton::toggled, this,
+          [this](bool on) { emit armToggled(id_, on); });
 
   setSelected(false);
 }
@@ -131,6 +173,36 @@ void ChannelStrip::setMute(bool on) {
 
 void ChannelStrip::setSolo(bool on) {
   soloBtn_->setChecked(on);
+}
+
+void ChannelStrip::setArmed(bool on) {
+  armBtn_->setChecked(on);
+}
+
+void ChannelStrip::setRoutes(const QStringList& busNames, int busIndex) {
+  if (!routeCombo_)
+    return;
+  const QSignalBlocker blocker(routeCombo_);
+  routeCombo_->clear();
+  routeCombo_->addItem(QStringLiteral("MASTER"));
+  routeCombo_->addItems(busNames);
+  routeCombo_->setCurrentIndex(std::clamp(busIndex + 1, 0,
+                                          routeCombo_->count() - 1));
+}
+
+void ChannelStrip::hideRoutes() {
+  if (routeCombo_)
+    routeCombo_->hide();
+}
+
+void ChannelStrip::showSendsButton(bool show) {
+  if (sendsBtn_)
+    sendsBtn_->setVisible(show);
+}
+
+void ChannelStrip::showFxButton(bool show) {
+  if (fxBtn_)
+    fxBtn_->setVisible(show);
 }
 
 void ChannelStrip::setSelected(bool on) {
@@ -206,6 +278,16 @@ void ChannelStrip::attachHints(HintManager* hints) {
                         return self->soloBtn_->isChecked() ? QStringLiteral("solo")
                                                            : QStringLiteral("off");
                       });
+  hints->registerTool(armBtn_, QStringLiteral("%1 · Record arm").arg(n),
+                      QStringLiteral("Arm this track for input recording; the "
+                                     "recorded clip lands on it"),
+                      QString(), icons::IconId::None,
+                      [self]() -> QString {
+                        if (self.isNull()) return QString();
+                        return self->armBtn_->isChecked()
+                                   ? QStringLiteral("armed")
+                                   : QStringLiteral("off");
+                      });
   hints->registerTool(meter_, QStringLiteral("%1 · Level").arg(n),
                       QStringLiteral("Post-fader signal, peak + RMS both sides"),
                       QString(), icons::IconId::None,
@@ -220,6 +302,15 @@ void ChannelStrip::attachHints(HintManager* hints) {
   hints->registerTool(nameLabel_, QStringLiteral("%1").arg(n),
                       QStringLiteral("Click to select this mixer channel"),
                       QString(), icons::IconId::None, nullptr);
+  if (routeCombo_)
+    hints->registerTool(routeCombo_, QStringLiteral("%1 · Route").arg(n),
+                        QStringLiteral("Send the channel to the master output "
+                                       "or a named bus"), QString(),
+                        icons::IconId::None,
+                        [self]() -> QString {
+                          if (self.isNull() || !self->routeCombo_) return QString();
+                          return self->routeCombo_->currentText();
+                        });
 }
 
 } // namespace misuc::ui

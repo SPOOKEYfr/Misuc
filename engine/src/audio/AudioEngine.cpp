@@ -6,7 +6,13 @@
 #include <cstring>
 #include <thread>
 
+// The default backend is platform-selected: PipeWire on Linux, WASAPI shared
+// mode on Windows (both satisfy the same AudioBackend contract).
+#if defined(_WIN32)
+#include <misuc/engine/audio/WASAPIBackend.h>
+#else
 #include <misuc/engine/audio/PipeWireBackend.h>
+#endif
 #include <misuc/engine/audio/WavFile.h>
 #include <misuc/engine/core/Logger.h>
 #include <misuc/engine/dsp/Dsp.h>
@@ -14,6 +20,18 @@
 using misuc::core::logInfo;
 
 namespace misuc::engine {
+
+namespace {
+#if defined(_WIN32)
+std::unique_ptr<AudioBackend> defaultBackend() {
+  return std::make_unique<WASAPIBackend>();
+}
+#else
+std::unique_ptr<AudioBackend> defaultBackend() {
+  return std::make_unique<PipeWireBackend>();
+}
+#endif
+} // namespace
 
 AudioEngine::~AudioEngine() {
   // Tear down the backend before any member buffer is freed: the real-time
@@ -26,8 +44,7 @@ AudioEngine::~AudioEngine() {
 }
 
 AudioEngine::AudioEngine(std::unique_ptr<AudioBackend> backend)
-    : backend_(std::move(backend ? std::move(backend)
-                                 : std::make_unique<PipeWireBackend>())),
+    : backend_(std::move(backend ? std::move(backend) : defaultBackend())),
       controlQueue_(std::make_unique<ControlQueue>()) {
   // ~5 ms fade coefficient at 48 kHz.
   masterSmoother_.setCoefficient(0.004f);

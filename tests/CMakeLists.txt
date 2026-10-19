@@ -24,6 +24,12 @@ add_executable(misuc_tests
 target_link_libraries(misuc_tests PRIVATE misuc_engine)
 target_compile_options(misuc_tests PRIVATE)
 
+# The backend-specific live tests are per-platform: PipeWire tests on Linux,
+# WASAPI tests on Windows (see MISUC_BACKEND_* definitions in engine/CMakeLists).
+if(WIN32)
+  target_sources(misuc_tests PRIVATE test_audio_wasapi.cpp)
+endif()
+
 add_executable(misuc_headroom ../tools/headroom.cpp)
 target_link_libraries(misuc_headroom PRIVATE misuc_engine)
 

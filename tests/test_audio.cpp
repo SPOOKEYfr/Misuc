@@ -1,3 +1,9 @@
+// Live audio smoke tests for the PipeWire backend. They are compiled only
+// where MISUC_BACKEND_PIPEWIRE is defined (the tests talk to the live daemon
+// and only report counts; they must never fail a release build when no daemon
+// is present). Windows has its own WASAPI equivalents in test_audio_wasapi.
+#if defined(MISUC_BACKEND_PIPEWIRE)
+
 #include <misuc/engine/audio/PipeWireBackend.h>
 #include <misuc/engine/audio/AudioEngine.h>
 
@@ -167,3 +173,5 @@ TEST_CASE(groove_and_capture_lifecycle) {
   engine.closeAudio();
   TEST_ASSERT(!engine.isRunning());
 }
+
+#endif // MISUC_BACKEND_PIPEWIRE

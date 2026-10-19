@@ -16,3 +16,7 @@ _CPack_Packages/
 MISUC_DEVELOPMENT_LOG.txt
 MISUC_MASTER_PROTOCOL.txt
 PHASE3_WORKSPACE_SPEC.txt
+
+# Stray packaging artifacts
+b_band.png
+t_band.png

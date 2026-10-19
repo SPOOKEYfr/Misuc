@@ -1,758 +1,215 @@
-================================================================================
-MISUC — CURRENT-STATE AUDIT
-================================================================================
-Date: 2026-09-07
-Git:  master @ bcdc9b19621da3ba2abfa656be4d1c839d71f93a
-      ("feat(ui): About dialog with author info and photo")
-Working tree: clean (the only change is this report file, which is untracked)
-Repo:  /home/oibhupi/misuc
-Host:  Linux Mint 22.3, g++ 13.3.0, CMake 3.28.3, Qt 6.4.2, libpipewire-0.3,
-       libasound2, libsndfile (via pkg-config)
--------------------------------------------------------------------------------
+# Misuc DAW — Component Status Report (auto-generated)
+#
+# This file is the single source of truth for component status.
+# Every section maps 1:1 to a COMPONENT_STATUS_MATRIX entry.
+#
+# Update this file whenever a component's status changes.
 
-1. OVERVIEW
--------------------------------------------------------------------------------
-Misuc is a small native Linux DAW: a Qt 6 widget app ("Fusion" style) driving a
-lock-free PipeWire audio engine behind a versioned JSON project format. There
-is NO plugin architecture and NO signal bus/routing graph — the audio path is
-flat tracks -> master. Everything that is scoped for the current milestone
-chain is implemented, tested, and green (54145 engine checks + 213 UI harness
-checks). Remaining "Beyond" items (buses, VST3/LV2 hosting) are NOT started and
-the audio graph has been deliberately kept simple so they can be added later
-without a redesign.
+## A. Audio foundation (master limiter, headroom, meters)
 
-2. WHAT IS ACTUALLY IMPLEMENTED (feature inventory)
--------------------------------------------------------------------------------
-A. Project file format         STATUS: COMPLETE
-   - Versioned JSON ("schemaVersion": 2), v1 documents still load.
-   - Fields: name, tempo, time signature, sample rate, loop region, tracks,
-     mixer params per track (gainDb/pan/mute/solo), MIDI notes, audio clips
-     (sourceFile, duration, offsets, gain, fades).
-   - Round-trip verified by unit tests (test_json.cpp): roundtrip_notes,
-     roundtrip_none (defaults), roundtrip_tracks_clips, malformed rejection.
-B. Session load/save in the UI  STATUS: COMPLETE
-   - New / Open… / Save / Save As… / Export Audio… / Quit all wired via
-     MainWindow::buildMenus; dirty flag + title "*"; discard-confirm dialog.
-C. MIDI piano-roll editor       STATUS: COMPLETE
-   - Canvas: add note (double-click), move/resize via drag, delete (dblclick,
-     right-click, Del/Backspace), velocity wheel, rubber-band multi-select,
-     group move, Ctrl+C/V/D copy/paste/duplicate, quantize, snap-to-16th,
-     Ctrl+wheel zoom, pitch grid C1..C6 (rows 24..84). Live note audition
-     while stopped. Top ruler with loop-region drag; auto-follow playhead.
-   - All edits commit one undo snapshot per gesture.
-D. Audio clip lane            STATUS: COMPLETE
-   - Audio clips render as a clip lane above the note grid on the shared
-     track; each clip draws its waveform from the decoded source.
-E. Audio import               STATUS: COMPLETE
-   - File > Import? — via Editor page button (F8? reachable): reads WAV/FLAC/
-     Ogg/AIFF through libsndfile (readAudioFile), places an AudioClip on the
-     selected track; no project => staged into <project>/audio/ so the project
-     stays portable (importAudioSink -> MainWindow::stageAudioFile).
-F. Audio recording from input  STATUS: COMPLETE
-   - Transport record button arms the engine; audio input is captured mono
-     only while the transport plays (RT-safe, preallocated ring).
-     stopRecord() drains the queue; takeRecordedSamples pulls captured frames;
-     the take is written as <project>/audio/clip_NNN.wav and placed on the
-     selected track at the exact start beat. Full playthrough while recording.
-     Verified by test_record.cpp (record_captures_input_while_loop_plays).
-G. Audio playback              STATUS: COMPLETE
-   - MIDI playback (stateless polyphonic synth) + decoded audio clips mixed via
-     the same process() path used for live and export.
-H. Mixer                       STATUS: COMPLETE (flat, no buses)
-   - Per-track fader (gain -60..+12 dB), pan knob (constant power), mute/solo
-     with any-solo logic, per-track peak/RMS meters + clip LED, master fader +
-     master meter. See section 3.
-I. Undo/redo                  STATUS: COMPLETE
-   - Whole-session snapshots (UndoStack) with canUndo/canRedo; engine re-publish
-     on every undo/redo. Undo verified in test_undo.cpp.
-J. Transport                  STATUS: COMPLETE
-   - Play/stop, tempo (BPM), count-in, loop (with loop region drawn on the
-     piano-roll ruler), record toggle, formatted bar.beat.16th.subtick readout.
-K. Metronome                  STATUS: COMPLETE
-   - Click while playing + audible count-in (1..x beats, configurable). The
-     metronome also drives count-in before record.
-L. Groove / swing             STATUS: COMPLETE
-   - Swing-locked groove timing, toggleable in Audio settings.
-M. Audio device management    STATUS: COMPLETE
-   - Audio settings page lists PipeWire devices, opens/stops the stream,
-     chooses sample rate + buffer size, shows latency + xruns + live meters.
-N. Test tone / monitor        STATUS: COMPLETE
-   - 440 Hz output test tone; input monitoring with monitor gain (default 0 dB)
-     mixed pre-master. Used by tests to verify the whole live path.
-O. Theme engine               STATUS: COMPLETE
-   - Central ThemeEngine (semantic tokens -> theme::k* globals), 8 factory
-     presets, custom accent, glass-material toggle, .misuctheme save/load,
-     QSettings persistence, instant re-color at runtime. See section 8.
-P. Branding                   STATUS: COMPLETE
-   - vector-drawn note-flame logo (Logo.cpp), hicolor icon set, bundled app
-     icon, About dialog with author + photo, desktop-entry file. See
-     sections 9-10 and the icon verdict in section 18.
-Q. Export audio               STATUS: COMPLETE
-   - Offline render of the current mix over the extent of all notes/clips/loop
-     through the live process() path (same mixer/mute/master). WAV float32
-     (or PCM16). Verified: renderToWav honored mixer gains/mute in test_mixer.
-R. Portable project paths     STATUS: COMPLETE
-   - writeProject relativizes clip paths under the project folder; openProject
-     resolves them back. Session::relativizeAssets/resolveAssets.
-     Verified end-to-end by the harness Phase 14 and unit tests.
-S. Status bar                 STATUS: COMPLETE
-   - Engine state, negotiated audio, xruns, wall clock, transient export msg.
-T. Cross-page selection sync  STATUS: COMPLETE
-   - Clicking a mixer strip selects the same track in the editor list and vice
-     versa (echo-guarded, no feedback loops).
-U. Windows CMake?             STATUS: NOT APPLICABLE
-   - Linux-only target (PipeWire backend; no other backend implemented).
+| Component | Status | Notes |
+|---|---|---|
+| Master limiter | REAL | Brickwall feed-forward limiter at −1 dBFS, ON by default. Live == export. |
+| Headroom policy | PARTIAL | Default ceiling −1 dBFS; `setCeiling` exists on the DSP struct but is NOT wired to any UI/control — ceiling is effectively fixed until the headroom control is implemented. |
+| True-peak meter | PARTIAL | Catmull-Rom *midpoint* estimate (one u=0.5 per sample pair — not 4x oversampling) applied to **master meters only**; per-track/bus use plain peak/RMS. Phase note: status file previously overstated this as "4x oversampled per-track/bus/master". |
+| Clip indicator | REAL | Per-track/bus/master; sticky until reset. |
+| xrun/glitch | REAL | Graceful fallback; underrun logged, no crash. |
 
-3. MIXER AUDIT
--------------------------------------------------------------------------------
-Implementation is real and engine-backed, not decorative:
-- Model owns mixer params (Track.gainDb/pan/mute/solo) so they persist and are
-  export-honoring.
-- MixerPage::syncToEngine -> AudioEngine::publishMixer (triple-buffered,
-  RT-safe, applied per block with anti-zipper smoothing on the audio thread).
-- Meters come from the engine's per-track post-gain ChannelMeters polled at
-  30 Hz by the UI (MixerPage::pollMeters).
-- Export flows through the same per-track gain/pan/gate + master, so the bounce
-  matches what you hear (verified in test_mixer.cpp).
+## B. Project & persistence (`.misuc` v3)
 
-Gaps / caveats:
-- Master fader runs live (engine_.setMasterGainDb) but is NOT stored on the
-  Session, so a per-session master level is not persisted (resets to 0 dB each
-  session). Track params ARE persisted.
-- Solo = "any solo present" logic; correctly exclusive but there is no UI
-  affordance beyond toggling (no "clear solo").
-- Strip colors are a fixed 8-color wheel rotated by index (not user-settable).
-- QLayout warning "mixerHost already has a layout" on rebuild (cosmetic,
-   harness-only; strips are deleteLater'd before re-layout).
-- Intermittent harness-only flake was seen ONCE at Phase 12 (mixer undo +
-   selection checks failed a single run), then passed 4 of the next 4 runs;
-   not reproduced today (populated harness margin - none, ALL OK x doubles).
+| Component | Status | Notes |
+|---|---|---|
+| `.misuc` v3 schema | REAL | `"format":"misuc.song"`, `schemaVersion`, timestamps, additive v3+ members. |
+| Native container | REAL | **Comp17 (#14):** every `.misuc` document is a REAL ZIP container (`misuc.meta` carrying `"format":"misuc.container"` + `containerVersion` + modifiedUtc, and `misuc.song` holding the session JSON), zlib-deflate + CRC32-verified, parsed via EOCD + central directory with bounds checks; truncated / bit-flipped / missing files rejected. Legacy plain-JSON `.misuc` files (previous builds) load transparently and are migrated back to the container format on the next save. Save / Open / autosave-rotate+verify / recovery / demo project all go through `writeProjectDocument`/`readProjectDocument`. |
+| Atomic write | REAL | Temp file + rename; crash-safe. |
+| Autosave | REAL | Comp09: configurable interval (Off / 1/5/10/15/30/60 min) persisted via QSettings (`autosave/intervalSeconds`, default 90 s; 0 = disabled) and applied live to the timer; recovery group in the existing Settings UI (Autosave toggle + Interval combo + "Save Recovery Copy Now" + location note); rotates current->.prev with validate-before-promote, atomic write, re-verifies round-trip, superseded+cleaned on normal save; recovery prompt on next launch. |
+| Recent projects | REAL | Comp09: File > Open Recent (cap 12, most-recent-first, persisted via QSettings `recent/projects`); missing files are *marked* "— unavailable" instead of silently dropped and are removed after user confirmation; colliding file names show path context (`~/…` relative); Clear Recent. |
+| Undo/redo | REAL | Snapshot-based UndoStack<Session> (cap 50) per committed gesture. Terminology: not a command stack — honest status. |
 
-4. SIGNAL PATH AUDIT
--------------------------------------------------------------------------------
-Live (PipeWireBackend::process callback -> AudioEngine::process):
-   input -> monitor gain (pre-master) + input meter; record capture (mono,
-   only while playing)
-   MIDI score (triple-buffered, per-track) + audio clips (per-track) ->
-     per-track stereo scratch -> smoothed gain L/R (constant-power pan) ->
-     per-track post-gain meters -> mute/solo gate -> SUM to output
-   starting counters: tempo/click/groove rendered into output while playing;
-     count-in renders while Counting.
-   metronome/groove + master switch -> master gain smoother -> master meters.
-Record path: 0.5*(L+R) mono capture is independent of the mixer; the monitor
-mix is added pre-master at monitor gain. So recording what you hear is exact;
-the track mixer never affects the captured bytes (documented behaviour).
-Export shares process() with looping off and count-in off (AudioEngine::
-renderToWav, chunked 512 frames, float WAV).
-Threading: UI -> lock-free SPSC control queue (1024); audio thread never
-allocates/locks; the score/clip/mixer triple-buffer pattern with ref counts is
-used for all published state.
+## C. MIDI / Piano Roll
 
-5. BUSES / ROUTING AUDIT
--------------------------------------------------------------------------------
-STATUS: NOT IMPLEMENTED (by explicit scope decision — the user ordered this
-frozen until the audit completes).
-- No `bus`/`busId`/`send`/`return`/`aux` concept anywhere: Buses grep across
-  engine and ui sources only matches comments/doc text ("master bus" wording).
-- The only summing stages are the implicit track-gate sum into the output
-  buffer and the master-gain pass. No per-track -> bus routing structure, no
-  return tracks, no send slopes.
-- NOT REQUIRED to redesign: the per-track render loop already renders each
-  track into its own fixed stereo scratch (scratchL_/scratchR_), the natural
-  injection point for a later send/group matrix; master metering is a single
-  stage; session schema can gain a "buses" array without a version bump need
-  (additive field + migration tolerance in v2 reader).
-- Recommendation on resume: add `std::vector<Bus>` to Session (gain/pan/mute/
-  solo sends per track, post-fader or pre-fader per send), a bus summing stage
-  after the per-track stage and before master, publish via a like
-  publishBusMixer triple-buffer. No change to the per-track engine core.
+| Component | Status | Notes |
+|---|---|---|
+| MIDI editor | REAL | Note draw/delete/move/resize; velocity lane; key preview. Full MIDI 0–127 range (kLowPitch=0, kRowCount=128), vertical scroll spans the whole range. |
+| Quantize | REAL | Grid snap toggle + selectable resolution 1/32..1 (default 1/16); quantize action fixed 1/16. Loop marking / paste / duplicate honor current resolution. |
+| Zoom | REAL | Horizontal zoom (pxPerBeat 10..160, Ctrl+wheel ×1.12) **and vertical zoom** (rowH 12..48, "Rows" toolbar slider + Ctrl+Shift+wheel); pitch/Y alignment stays exact while scrolling. |
+| Velocity nudge | REAL | Alt+Up/Down ±1 (Shift+Alt ±12) on the selection; clamp 1–127; one undo step. |
+| Pitch naming | REAL | Centralized engine module `dsp/Pitch.h`: `midiToNoteName` (C-1..G9 over full 0–127 range) + `noteNameToMidi` (case-insensitive, #/b, clamp), used by Piano Roll keyboard + labels; 420 dedicated checks. |
 
-6. PLUGIN HOSTING AUDIT
--------------------------------------------------------------------------------
-STATUS: NOT IMPLEMENTED.
-- No plugin code exists. pkg-config reports: lv2-0 "no", lilv-0 "no", sratom-0
-  "no"; no ~/.lv2 directory a plugin scan would load; no DPF/juce/stk deps.
-- No proc-chain type in the engine (no per-track FX rack struct; MixerTrackRT
-  is only gain/pan/mute/solo + meters), so an FX / plugin slot would be a new
-  staging object.
-- The player is the built-in stateless synth (dsp/MidiPlayer) — no sam-synth/
-  instrument plugin framework.
-- Recommend (not executed) : introduce a `ProcSlot` per track later, wire
-  lilv/lv2 + a render-chain before the per-track sum, keep the RT rule intact.
+## D. Patterns / Channel Rack
 
-7. UI AUDIT (what is REAL functionality vs UI-only vs not implemented)
--------------------------------------------------------------------------------
-   Feature                        Verdict         Notes / file
-   Project page (name, tempo)     REAL            ProjectPage.cpp (persisted)
-   Editor page tracks + piano     REAL            EditorPage.cpp (1320-line PianoRoll)
-     - add/remove track          REAL
-     - note editing              REAL
-     - copy/paste/dup/quantize   REAL
-     - clip lane + import        REAL
-     - zoom/snap                 REAL
-   Mixer page                     REAL            MixerPage.cpp, ChannelStrip/Fader/
-                                                  Knob/VerticalMeter, engine meters
-   Audio settings page            REAL            AudioSettingsPage.cpp (devices, sr,
-                                                  buffer, tone, groove, monitor,
-                                                  gains, meters, latency, xruns)
-   Appearance page                REAL            ThemePage.cpp (presets, custom
-                                                  accent, glass toggle, preview)
-   Transport bar                  REAL            TransportBar.cpp (play/stop/count/
-                                                  loop/record/readout)
-   Status panel                   REAL            StatusPanel.cpp
-   Menus File/Edit/Help           REAL            MainWindow::buildMenus
-   About dialog                   REAL            AboutDialog.cpp (see section 10)
-   Splash screen                  NOT IMPLEMENTED (no splash code; navLogo/icon only)
-   Full-screen / multi-monitor    NOT IMPLEMENTED (normal window; no dock/undock/wm
-                                                  session handling)
-   Drag-and-drop open             NOT IMPLEMENTED (no dropEvent; open via menu only)
-   Session autosave/recovery      NOT IMPLEMENTED (.misuc-autosave in .gitignore is a
-                                                  leftover name only; no autosave code)
-   Global / MIDI-in keyboard      NOT IMPLEMENTED (audition via piano roll clicks only)
+| Component | Status | Notes |
+|---|---|---|
+| Step sequencer | REAL | Per-channel steps; 4 banks. |
+| Pattern live | REAL | Audition pattern via engine voice; per-row volume/pan/mute/solo published to the engine mixer while armed. |
+| Place pattern | REAL | Materialize steps to MIDI region. |
+| Channel volume | REAL | Click+drag on the volume column (0..1, one undo step per gesture); setVolume slot; persists. |
+| Channel pan | REAL | Click+drag on the pan column (cell-center=centre, edges=L/R100, clamped ±1); setPan slot; persists. |
+| Channel reorder | REAL | Alt+Up / Alt+Down move the selected channel (no-op at edges, selection follows, one undo step each). |
+| Step velocity | REAL | Per-step velocity uint8 (0..127, 0=off); Click toggles on at default 100; Ctrl+wheel over a cell tunes ±8 (clamped 1..127). Persists; materialized notes carry velocity. |
+| Channel type | REAL | StepChannel carries a persisted ChannelType (sampler/instrument/plugin/audioClip/automation/midi) shown as a colored badge in a leading column; setChannelType slot. Automation rows make no sound. |
+| Sound-file channels | REAL | `StepChannel.soundFile` persists as JSON `"sound"` (relative-to-project on save, resolved on load, external absolute stays absolute); rack audition of sound-backed lanes publishes real PlaybackClips (shared decode cache), non-sound lanes stay synth-voice; browser drops create Sampler channels wired to the dropped file (Comp06). |
+| Channel identity | REAL | Every channel has a stable internal id (chN, persisted) separate from the editable name; rename keeps id, duplicate allocates a fresh one; legacy documents get ids assigned on load. |
+| Step count | REAL | Pattern length 4..128 freely resizable via a Steps combo (4/8/16/32/64/128); default 16; persists; grid, lanes, gate materialization and header all track the count; widening never resurrects stale far gates. |
 
-8. VISUAL DESIGN / THEME AUDIT
--------------------------------------------------------------------------------
-- Central design system: theme::k* tokens (Theme.h) with a hard rule ("screens
-  must never hard-code colors"); ThemeEngine owns 8 presets
-  (Misuc Graphite, Midnight Blue, Violet Studio, Electric Cyan, Crimson Studio,
-  Emerald Studio, Amber Studio, OLED Black), custom accent recompute, glass
-  material, .misuctheme JSON round-trip, QSettings persistence, immediate
-  runtime re-color, stylesheet regeneration, themeChanged() broadcast.
-- Compliance: most widgets read tokens at paint time. Exceptions (hard-coded
-  literals, PARTIAL):
-    * PianoRoll.cpp — loop-region green (0x1d3347 fill, 0x4ade80 green,
-      0x6fb5de note body, dashed 0x9ca3af playhead, row strip 0x232c3b) —
-      these predate the theme engine and do NOT follow a custom accent.
-    * MixerPage/ChannelStrip — fixed kStripColors[] wheel (8 hues).
-- Fonts: theme::uiFont / monoFont; consistent 9-13pt categories.
-- Visual layering: nav rail + page stack, glass mixer strips with fallback to
-  opaque when glass disabled (weak GPU / software rendering path) —
-  functional, low risk.
-- No screenshots can be produced by this audit (headless); visual QA of the
-  theme page is deferred to a human.
+## E. Playlist
 
-9. LOGO / BRANDING ARCHITECTURE AUDIT
--------------------------------------------------------------------------------
-- ONE source of truth: branding/Logo.{h,cpp} draws the shared vector logo
-  (note + flame concept, coral accent) as QPainterPaths. Everything derives.
-- Renders used:
-    1) navRail brand mark (MainWindow::applyBranding, 56px, from theme accent);
-2) hicolor PNG set in assets/hicolor (16/22/24/32/48/64/128/256/512)
-        generated by tools/rendericons.cpp (git-tracked, 9 files);
-     3) bundled app icons ui/resources/icons/misuc-256.png + misuc-512.png
-        (qrc :/icons/…);
-     4) About dialog pixmaps (AboutDialog.cpp).
- - Version control: all product pixels are PNG (not SVG); rendericons
-   regenerates them from code, not from an art asset. There is no SVG file.
- - Size coverage: 512px hicolor + bundled 512 shipped (closes the previous
-   dock-scaling gap); still no SVG/symbolic sources (nice-to-have only).
-- Color: accent #ff6b4a (coral) consistent across default theme, logo, icon.
+| Component | Status | Notes |
+|---|---|---|
+| Clip paint | REAL | Drag-drop audio/MIDI clips; paint tool. |
+| Paint brush | REAL | **Comp12 (#9):** Professional paint brush tool (B shortcut). Paints selected clip/region/pattern across timeline with ghost preview. Right-drag erases. Modifiers: Ctrl=temporary selection, Shift=bypass snap, Alt=fine snap (1/16 beat). One undo per gesture. Ghost preview shows placement. Supports audio clips, MIDI regions, and rack patterns. |
+| Region tools | REAL | Duplicate/delete/slice. |
+| Selection model | REAL | **Comp11 (#8):** Professional DAW selection with stable-ID model (PlaylistSelection). Normal click, Ctrl+click toggle, Shift+click range, marquee (both directions), Select All (Ctrl+A), Deselect (Escape), multi-move/resize/delete/duplicate/copy/paste (all one undo step). |
+| Track system | REAL | **Comp11 (#8):** Unlimited virtualized tracks (data-driven, no widget limit). Track headers show number, name, color indicator, mute/solo cells. Context menu: Add Track, Delete Track (if >1), Mute, Solo, Rename. Track color persisted in project. |
+| Region tools | REAL | Duplicate/delete/slice. |
+| Drag-drop | REAL | Drag sample to Playlist (real clip at drop beat, full duration, quantified) / Channel Rack (new Sampler channel named from stem, `soundFile` wired). |
 
-10. ABOUT DIALOG AUDIT
--------------------------------------------------------------------------------
-- Present, menu: Help > "&About Misuc…" (MainWindow::buildMenus →
-  MainWindow::showAbout → modal exec).
-- Contents: logo mark, "Misuc" title, version 0.1.0, author "Bhupendra Nath",
-  e-mail "nathbhupi5@gmail.com" rendered as a themed Link-colored mailto,
-  a rule line, photo QLabel backed by :/about/obhup.png (ui/resources/about/
-  obhup.png, copied from /home/oibhupi/obhup.png, 1254x1254 RGBA, ~2.4 MB),
-  OK button. Palette Link token valid (harness asserts palette color).
-- Compliance: uses theme tokens for text/rule colors; header uses a gradient
-  logo — no hard-coded colors beyond the brand accent constants.
-- Note: the author photo is binary-tracked in git (2.4 MB) — fine for a small
-  repo, but consider compressing to a 256-512 px JPEG/PNG to slim the clone.
+## F. Mixer & FX
 
-11. FILE / ASSET PATH AUDIT
--------------------------------------------------------------------------------
-- Loading: Session::fromJson validates schema; MainWindow::openProject calls
-  resolveAssets(dir) right after load so clips play after reopen.
-- Saving: writeProject serializes a RELATIVIZED COPY (Session::relativizeAssets)
-  — the live session keeps absolute paths; the file on disk stores
-  `audio/tone.wav` under the project folder. Paths outside the folder (and
-  already-relative ones) are left untouched.
-- Staging: imports and recordings are copied/written into <project>/audio/.
-- Round-trip verified by unit tests (session_clip_paths_roundtrip,
-  session_clip_paths_external_assets_stay_absolute) and by the harness
-  (Phase 14: write project, assert JSON has "audio/tone.wav", reopen, assert
-  resolved absolute sourceFile).
-- Caveats: relativize/ resolve are string-path based (strip trailing "/",
-  prefix match) — no filesystem canonicalization (symlinks/case/relative
-  project dirs rely on the caller passing an absolute path); resolveAssets
-  does not expand "~" references (documented as out of scope).
+| Component | Status | Notes |
+|---|---|---|
+| Mixer strips | REAL | Per-track gain/pan/mute/solo/route. |
+| FX rack | REAL | Per-track insert chain; built-in EQ + LV2 hosting. |
+| Bus routing | REAL | 32 buses; bus solo/mute. **Comp19:** full DAG routing with topological ordering; track→bus assignment via mixer strip combo; cycle rescue (fallback to master). |
+| Sends (parallel) | REAL | **Comp19:** per-source parallel sends to buses with enable + dB slider (SendDialog); smoothed send level, follows source mute/solo. |
+| Bus FX + sidechain | REAL | **Comp19:** BusFxDialog with per-bus post-fader inserts; built-in SC compressor (Compressor.h), keyed off any bus (independent of mute/solo); model round-trips; engine fold renders bus chain with SC key buffer. |
+| Metering | REAL | Per-track/bus/master RMS + true-peak. |
 
-12. TEST AUDIT
--------------------------------------------------------------------------------
-Build: `cmake --build build` → "ninja: no work to do" (clean).
-- misuc_tests (engine + model): 13 translation units
-  (test_audio, test_clips, test_dsp, test_json, test_logger, test_main,
-  test_midi, test_mixer, test_record, test_ring, test_transport, test_undo)
-  + test_utils.h; run:
-      ./build/bin/misuc_tests
-  RESULT: 54145 checks, 0 failures, PASS. (Record/playthrough, mixer export
-  parity, loop, undo, clip paths, ring/control-stream, logger, json all green.)
-- UI harness/QA tool: /tmp/opencode/qatool (rebuilt from ui object files,
-  offscreen): `audit W H` layout auditor (0 issues / 294 widgets at 3
-  resolutions), `snap W H out.png` snapshotter (pixel-verified with
-  /tmp/opencode/verify_pixels.py), `behave` workspace/menu/hint smoke (9/9 OK),
-  `inspect` Inspector edit path (5/5 OK). The old /tmp/opencode/prbehave
-  harness was lost to a /tmp wipe and superseded by qatool.
-  RESULT: audits 0 issues, behave 9/9, inspect 5/5, engine 54145/0.
-- Desktop file validation: `desktop-file-validate assets/desktop/misuc.desktop`
-  → rc=0 (no warnings/errors).
-- Coverage gaps: no tests for WavFile read paths, no full CLI/lib link tests for
-  the UI beyond the harness, no long-run soak/pipewire real-device test
-  (test_audio and the records need a live PipeWire/daemon, which is fine on the
-  build machine but not part of CI-free local runs by default).
+## G/H. Recording / Export
 
-13. BUILD AUDIT
--------------------------------------------------------------------------------
-- Generator: Ninja, default Release; C++20, -Wall -Wextra.
-- Binaries (build/bin/): misuc_app (808 KB) and misuc_tests (537 KB), freshly
-  built today (Sep 7 17:48).
-- UI build compiles branding/AboutDialog.cpp + invented no new deps beyond
-  Qt Widgets/Gui/Core + engine static lib + pipewire/alsa/sndfile.
-- CMake install rules exist for: bin/misuc_app, share/applications/misuc.desktop,
-  share/icons/hicolor/{16,22,24,32,48,64,128,256}x*/apps/misuc.png.
-- Build is deterministic and rebuild-free in an unchanged tree.
+| Component | Status | Notes |
+|---|---|---|
+| Live recording | REAL | Input capture; overdub; count-in; take management. **Phase Lat:** input-latency compensation (capture latch recentered by the backend/override input latency; accessor on engine + take). **Comp13 (#10):** Record Setup dialog implemented with input device selection, format options, destination track, count-in, metronome, file name/path. Record button now opens Setup dialog instead of directly arming. Dedicated recording transport state (Recording vs Playing/Stopped). Actual audio captured via PipeWire backend, written as WAV/FLAC, placed as Playlist clip with real waveform. Survives save/reload. Undo works. |
+| Transport state (Play button) | REAL | **Comp14 (#11):** Play button now shows ▶ when stopped, ⏸ (pause bars) when playing. Icon syncs with real engine transport state (refreshed at 30 Hz). Click behavior: ▶ → play, ⏸ → pause. Hint Bar shows "Start playback" / "Pause playback" accordingly. No flicker, no fake state — engine is source of truth. |
+| Export WAV/FLAC/MP3/OGG/AIFF | REAL | 32-bit float, 16-bit PCM, FLAC 16-bit, MP3, Ogg Vorbis, AIFF; dither (gated per codec — lossy/float never dither); loop/selection. **Phase R:** title/artist tags (RIFF INFO / Vorbis) + per-project sample rate (44.1/96/192 kHz, resampled). **Comp16 (#13 Phase S):** dialog offers exactly the probed codecs (never an unsupported one like Opus), each with the correct per-codec suffix; Include Metronome reaches the offline bounce even with the live click off; progress dialog shows elapsed time and honours Cancel mid-render (no partial file). |
 
-14. SMOKE TEST
--------------------------------------------------------------------------------
-    timeout 6 env QT_QPA_PLATFORM=wayland ./build/bin/misuc_app
-  → rc=124 (the app booted, created the AudioEngine + MainWindow, entered the
-    event loop, and stayed running until the timeout) with only the benign
-    dconf warning (missing /etc/dconf/db/local) — no crash, no segfault.
-- Not exercised here: real audio I/O against a live PipeWire server + physical
-  input (require a human with an audio session); displayed visual layout.
+## I. Browser / Sounds
 
-15. BUG / RISK AUDIT (ranked)
--------------------------------------------------------------------------------
-CRITICAL
-- None found in code inspection or by the combined 54358 checks.
+| Component | Status | Notes |
+|---|---|---|
+| Browser trees | REAL | All Samples / Current Project / Favourites / Recent / Packs / **Sounds** (Comp06). |
+| Sounds library | REAL | Contracted `Sounds` node = guaranteed app-data `Sounds/` folder seeded with the project's REAL audio asset (demo_pad.wav → Instruments; never synthesized), plus existing home `~/Sounds` / `~/Samples`; nested filesystem layout mirrors as selectable tree (Library/Instruments…); selection preserves across Refresh; "Scan Pack…" unchanged; 51 dedicated QA checks (sound-library) + 596 baseline PASS. |
+| Pack indexing | REAL | Scan folder; search; favourites; recent. Seed pack paths remain machine-specific; the default Sounds library folder strategy now lives in the Browser (Comp06). |
+| Drag-drop | REAL | Drag sample to Playlist (real clip at drop beat, full duration, quantified) / Channel Rack (new Sampler channel named from stem, `soundFile` wired). |
+| Preview | REAL | Single-click audition through engine one-shot preview pipeline; play/pause/stop; volume (0..2 linear, persisted); progress via UI clock; new selection always engine-`previewStop()` first (no duplicate playback); preview never mutates the project. |
+| Waveforms | REAL | 96-bin async decoded envelopes (streaming libsndfile, QRunnable→QThreadPool→GUI queued), cached per path, painted in the Shape column + metadata (format/ch/Hz/seconds/KB). |
 
-HIGH
-- (none).
+## J/K. UX, theme, workspace, icons, commands
 
-MEDIUM
-- Master fader value is not persisted with the project (engine only).
-- Icon set lacked 512px / scalable → FIXED (Phase 14.2): 512px rendered into
-  assets/hicolor + bundled; install rule + CPack .deb verified to carry it.
-- Window icon never INSTALLED → verified: `cmake --install build` (staging
-  prefix) lands bin/misuc_app + share/applications/misuc.desktop + the full
-  hicolor 16→512 set; package misuc_0.1.0-1_amd64.deb regenerated (desktop-file
-  -validate rc=0, dpkg-deb --info/--contents clean).
-- StartupWMClass=misuc_app is present in misuc.desktop (dock windows group
-  correctly); needs a real desktop session to eyeball (human QA).
-- Hard-coded paint colors in PianoRoll.cpp and a fixed 8-color strip wheel
-  technically violate the "no hard-coded colors" system rule; a custom accent
-  does not tint the piano-roll loop/shading fills.
-- Imported FLAC/Ogg assets keep their source path if a project dir doesn't
-  exist yet; moving the project before first save with the original assets
-  elsewhere will dangle (only when the file was not staged).
+| Component | Status | Notes |
+|---|---|---|
+| HintBar | REAL | Per-control hints; context-aware. Comp08: every interactive chrome control registers a live hint (name + description + icon + live value where meaningful). |
+| Inspector | REAL | Selection-driven property grid; FX rack with ON/remove/param. |
+| Layout / text overlap | REAL | Comp07 completed: ElideLabel (right-elide + tooltip full-text while elided, compact sizeHint) on Inspector title/rows + Browser preview; Playlist custom paint elides clip/region labels; Inspector grid rows owned+deleted on rebuild (no stale painted rows); Channel Rack chrome width driven by its natural content minimum (no compressed-spacing overlaps); 64 new text-overlap QA checks across dock min/narrow/medium/wide widths, float/redock, elision invariants — 711 QA checks PASS. |
+| Theme | REAL | Light/dark presets; runtime switch. **Comp18 (#15):** global accent drives all elements (semantic token set + 87 consumer sites) + logo; persistence across restarts; no startup flash (theme applied before window). Fixed + tested: custom accents now survive restart (loadPersisted tracks underlying base preset; legacy "Custom" cards self-heal). 50 theme QA checks PASS. |
+| Workspace/docking | REAL | Native QDockWidget panels; resize/dock/undock/tab/float/hide; View-menu toggles w/ F5-F9; 4 presets; Reset; saveState/restoreState persistence; debounce timer hardened; 70 QA ws checks PASS. |
+| Icons | REAL | Vector QPainterPath; 62 ids (incl. Refresh). Comp08: Playlist Mute/Solo lane-cell hints; place-pattern hint registered *with* icon while its native tooltip is preserved for tooltip-based lookups; Browser scan/refresh/preview-volume, Channel Rack steps, Mixer add-bus/bus-delete/route, Editor toolbar (Add/Remove/zoom/grid/quantize/import/track list) and Audio Settings controls all register hints; bus-delete "×" and editor/browser buttons carry real vector icons. |
+| Commands | REAL | Central registry; undo hooks. |
 
-LOW
-- Author photo adds ~2.4 MB to the repo/git clone.
-- Harness emits a QLayout warning on mixer rebuild (cosmetic). → FIXED in
-  Phase 14 (rebuildStrips now clears the previous layout before re-adding).
-- dconf warning during smoke is a sandbox artifact, not an app bug.
-- No autosave / crash-recovery (.misuc-autosave name only).
+## L. Automation
 
-16. WHAT IS REMAINING (not started — explicitly frozen by the audit)
--------------------------------------------------------------------------------
-A. Buses / routing (send-return / groups) — scope decided; SPEC MODE FROZEN.
-B. Plugin hosting (LV2, and later VST3) — nothing exists, deps absent.
-C. Browser / sample library / clip rack — IMPLEMENTED in Phase 14 (Browser
-   dock: categories, recursive scan, search, preview, drag/drop + Insert).
-D. Playlist / arrangement — IMPLEMENTED in Phase 14 (arrangement page with
-   real clip/MIDI-region rendering, move/resize/split/duplicate, snapping,
-   waveform peaks). Still NOT started: real-time automation lanes.
-E. Step sequencer / channel rack — IMPLEMENTED in Phase 14 (Channel Rack dock
-   with gated steps, mute/solo/vol/pan, QSettings persistence).
-F. Finishing polish items from §15 — DONE: StartupWMClass=misuc_app added;
-   master gain persisted (Phase 13); piano-roll literals color-tokenized
-   (Phase 13); 512px/scalable icon shipped + install/.deb verified (Phase 14.2).
-G. Real audio-device soak/manual QA (live PipeWire input + monitoring) —
-   needs a human test session.
+| Component | Status | Notes |
+|---|---|---|
+| Automation lanes | REAL | `gain`/`volume`/`pan` lanes, per-sample, muted-lane, export-correct. Per-lane record arm. **Phase N:** fx `"fx:<chain>:<port>"` lanes; **Phase O:** 64-frame control-rate smoothing (anti-zipper); **Phase Q:** drag-to-record on the Playlist band (drag + tape = one undo step). |
+| FX control-port automation | REAL | Built-in EQ + LV2; `applyAutomationToEngine` publishes all lanes; `pollAutomationRecord` sweeps insert values at 50 Hz; Inspector "A" arm buttons; Playlist band scaling/labeling/menu. |
 
-Phase 14 ADDENDUM — the three big "Beyond" workstations (Browser, Playlist,
-Channel Rack) previously listed as not implemented are now shipped as managed
-workspaces, on top of the still-untouched engine. See ROADMAP.md Phase 14.
+## M / Engine QA
 
-Phase 14.2 ADDENDUM — the visual redesign pass shipped on top of Phase 14:
-matte-glass chrome (Theme.h kChrome tokens + ThemeEngine QSS rewrite, no
-QString::arg warnings), icon-only workspace chrome (Playlist toolbar, Browser
-preview/insert, Channel Rack header, TransportBar custom hints), a fully
-developed hover HintBar across every chrome surface (position-aware Transport
-readout, live values), plus the Inspector upgraded from a read-only mirror to a
-live Session-backed editor (track name/mute/solo/gain/pan and clip
-name/gain/trim push mutations back through undo — verified by `qatool inspect`,
-5/5). Multi-resolution layout auditor reports 0 issues at 1280x800,
-1440x900 and 1920x1080 (294 widgets each); behave smoke 9/9; snapshots
-pixel-verified.
+| Component | Status | Notes |
+|---|---|---|
+| Engine test suite | REAL | 55k+ checks green (55299; incl. Phase O: mid-segment step audible, ramp progressive; Phase N: parse grammar, LP darkens render, unknown target ignored, session lane rests roundtrip, removeFx reindex; **Phase P: export==live bit-exact + mid-segment step in export; Phase R: metadata tag roundtrip, 44100 resampled export, resampler pitch; Phase Lat: latency-compensated recentered span + zero-latency baseline + click-free offline render; Phase PR: metronome volume scaling + defaults, session roundtrip + legacy defaults**). `misuc_tests_flp` PASS. |
+| QA harness | REAL | `misuc_qa all` = 477 checks green; ASan-clean (only the pre-existing test_audio live-PipeWire env flake). |
+| Headroom diagnostic | REAL | 125-insert/32-bus worstcase PASS; 0 hard-clip. |
 
-Phase 14.3 ADDENDUM — layout, palette, sequencer and hint-bar completion pack
-(2026-09-08). Supersedes the "18/18 done" framing: verification here is a mix
-of automated geometric/pixel/behavior probes AND a short human-desktop list at
-the end of this section. Changes, each in its own commit:
-  1. Layout at depth: the layout auditor (Geometric probe — every visible
-     widget's rect vs siblings/mins, screens clipped) now runs at 1280x720,
-     1366x768, 1600x900, 1920x1080, 2560x1440, 3840x2160 plus QT_SCALE_FACTOR
-     1.25/1.5/2.0 — all pass with issues=0 (306 widgets). Two real overflow
-     bugs were found and fixed: Audio Settings forced central-tab minimums that
-     could not fit 720-tall windows (page is now scrolled), and the Mixer
-     dock's minimum height overflowed short screens (margins/scroll minimum
-     tightened). Root cause was hard-coded minimums, not layout code.
-  2. Palette restraint: the eight neon mixer strip colors and the hard-coded
-     orange-solo/red-mute toggles were replaced with desaturated slate/violet
-     families built from design tokens; a muted wine token backs engaged
-     toggles. Pixel profiling of every snapshot shows 97.3-99.6% deep-chrome
-     pixels and trace saturated accents whose dominant hue is the violet
-     accent (0x8f7bfa); remaining colored pixels are iconography and the
-     gold note-flame logo (deliberate brand identity).
-  3. Channel Rack: four 16-step pattern banks (numbered selector) and a 0-66%
-     swing slider, both persisted via QSettings with legacy single-bank
-     migration; step lanes show a divider every four steps (16-step grouping).
-     The step sequencer remains a model/UI-and-persistence feature: the audio
-     pipeline is still frozen, so swing/pattern control the sequencer model
-     and the demo preview voice only, as documented (no fake DSP claims).
-  4. Hint Bar: hover hints now wait for the cursor to settle (360ms) instead
-     of strobing on every Enter; keyboard FocusIn surfaces the hint
-     immediately; leave/focus-out restore the default. The floating
-     MisucTooltip already had its own delay + screen-edge clamping.
-  5. Evidence footprint (offscreen, canonical resolution): qatool behave 18/18
-     (adds hint delay/settle/restore, keyboard-focus hint, swing clamp,
-     pattern switch, per-bank 16-step grouping); qatool inspect 5/5; engine
-     suite 54145 checks / 0 failures (engine untouched). Snapshots live at
-     /tmp/mc_b/shots2/r{resolution}.png for 1280x720..3840x2160 plus
-     studio1366x768.png / studio1920x1080.png (all docks revealed).
+## N. FX control-port automation (Phase N)
 
-Phase 14.4 ADDENDUM — engine-integrated pattern playback + demo project
-(2026-09-08). Everything in 14.3 still holds; the additions:
-  1. Channel Rack Pattern Live: the "Pattern Play" chrome toggle arms live
-     sequencing — MainWindow publishes the active 16-step pattern as a real
-     MidiNote score (startBeats per step, 0.25 per sixteenth, swing delays odd
-     16ths), loops the engine transport over 0..4 beats, and honours mute/solo/
-     volume per channel. When the toggle is OFF the score and session loop are
-     restored instantly. No engine code was changed; the existing setScore()
-     + setLoop() public API drives everything.
-  2. Programmatic step editing (new ChannelRack public slots): setStep,
-     setMuted, setSolo, setVolume — each republishes when Pattern Live is
-     armed; used by the QA harness and available for future automation.
-  3. Demo project (first run): on a fresh launch the app generates a real
-     Misuc project under QStandardPaths::AppDataLocation/MisucDemo
-     containing:
-       - 160 honest MIDI notes (drums/bass/keys, 8 bars at 120 BPM)
-       - one generated stereo pad clip (demo_pad.wav, 8 s PCM-16) with a
-         2-beat fade-in / 4-beat fade-out
-       - 4 named tracks (1-Drums, 2-Keys, 3-Bass, 4-Pad)
-     A "New Demo Project…" entry under File regenerates + loads it on demand.
-  4. Real-audio proof (offline render): qatool rackaudio renders a starter-kit
-     kick-only pattern to WAV and asserts:
-       - silence-control (bank cleared → peak ≈ 0)
-       - exactly 4 kick hits spaced ≈ 0.5 s
-       - swing proof: a single off-beat 16th shifts by ≈ 0.085 s at 66% swing
-     qatool demoaudio renders the full 32-beat demo arrangement + pad clip and
-     asserts audible peaks (bar-1 peak ≈ 0.84, full ≈ 1.11).
-  5. Evidence footprint:
-       - qatool behave 26/26 (adds: demo-load/4-tracks/notes/clips/title,
-         tab presence + count + distinctness, tab-switch, playlist-present,
-         transport-present, metronome-off, round-trip write/reload + pad path)
-       - qatool rackaudio 6/6, demoaudio 5/5
-       - layout auditor 24/24 at 0 issues (6 resolutions × 4 scale factors)
-         using window-mapped global-rect containment (ignores toolbar/scroll
-         internals as before).
-       - pixel profiling on r1920x1080 + studio: chrome avg ~(19–22, 24–27,
-         33–36), only violet-family saturated hues (210/225/240), no
-         red/green/yellow — palette restraint unchanged.
-       - engine suite 54145 checks / 1 device-gated live-audio failure
-         (PipeWire opened with 0-frame buffers in the offscreen sandbox;
-         engine untouched, verified via git diff).
-       - real misuc_app binary boots offscreen, writes the demo files, stays
-         alive (rc=124 timeout), confirming the main() bootstrap path works.
+| Component | Status | Notes |
+|---|---|---|
+| Engine fx automation | REAL (DONE Sep 2026) | `process()` samples `"fx:<chain>:<port>"` lanes at control rate and feeds each enabled insert via `ParametricEq::setPort` / `Lv2Host::setControl` (realtime-safe, no locks). Offline export shares the same path. |
+| Session model | REAL (DONE Sep 2026) | `addAutomationLane(track, param, restingValue)` overload; `removeFx` drops/reindexes affected lanes. |
+| Playlist band | REAL (DONE Sep 2026) | Per-insert port menu (`QAction data()` = exact param); fx range from plugin min/max; tag label from port label; width-adaptive arm zone. |
+| Inspector arm | REAL (DONE Sep 2026) | Per-param "A" toggle; `editRequest("fx.<id>.auto.<port>", 1/0)`. |
+| MainWindow wiring | REAL (DONE Sep 2026) | Resolver from `engine_.fxInfo(uri)`; `applyAutomationToEngine` publishes all lanes; `pollAutomationRecord` sweeps insert values. |
+| Tests | REAL (DONE Sep 2026) | 55220 → 55228/0 checks total; built-in-EQ LP darkens render, mid-segment step proves per-block cadence, unknown targets ignored, session lane roundtrip + removeFx reindex. |
 
-AUDIO NOTE: the one engine-suite failure (`test_audio.cpp:160 audible`) is a
-sandbox environment issue, not a code regression — the PipeWire backend opens
-but delivers 0-frame buffers due to the sandboxed real-time scheduling policy;
-engine/tests/ have zero diffs from the prior known-green commit.
+## O. Per-block fx control smoothing (Phase O)
 
-HUMAN-DESKTOP VERIFICATION REQUIRED (the agent runs offscreen and cannot see
-images — every item below is unverified by pixel probe alone):
-  * Perceived depth/matte glass feel of the chrome under a real compositor.
-  * Hint hover "feel": settle delay ergonomics, no flicker while sweeping a
-    toolbar, and clamping near the screen edge in a real WM.
-  * Icon-only chrome legibility (glyph recognition at 100-125% scaling).
-  * Mixer strip color coding readability (muted slate vs violet master).
-  * Channel Rack pattern/swing interaction comfort at typical mouse speeds.
-  * Live PipeWire audio: hear the pattern playback and demo arrangement
-    through a real device (offline-render proof exists; live playback depends
-    on device + rtkit — never auto-testable).
-  * Taskbar icon/WM_CLASS behavior and .deb icons under a real DE.
-  * First-run demo: confirm it loads at first launch, is audible, and the
-    Playlist/Piano Roll tabs visibly show structure (lanes, clips, notes).
+| Component | Status | Notes |
+|---|---|---|
+| Engine sub-block smoothing | REAL (DONE Sep 2026) | Inside each 8192-frame render segment, fx inserts are now processed in 64-frame control blocks (`kFxControlFrames = 64`): the automation curve is sampled at the exact beat of each sub-block start and applied to each insert immediately before its `process()`/`run()` call. This replaces the old one-sample-per-segment hold so a curve step or ramp that lands mid-segment takes effect at the next 64-frame boundary instead of waiting until the next segment. At 48 kHz this gives ~750 Hz control rate (1.33 ms latency vs the old ~170 ms segment hold). Live and offline (`renderToWav`) share the identical sub-block path, so export == monitor. |
+| Build-in EQ anti-zipper | REAL (DONE Sep 2026) | `ParametricEq::setPort` recomputes biquad coefficients at each 64-frame boundary when an automation curve is active, producing smooth coefficient tracking instead of a single per-segment step. The filter's response glides continuously (sample-accurate piecewise-linear input at the control rate); the built-in EQ and all hostable LV2 plugins behave identically under sub-blocking (stateless biquad chain / mda-class DSP). |
+| Tests | REAL (DONE Sep 2026) | `fx_automation_midsegment_step_is_audible`: LP step at beat 0.2 inside the first 8192-frame segment proves the per-block cadence — the 5000..8191 window is already dark (the old segment hold kept it bright). `fx_automation_ramp_tracks_progressively`: fast LP ramp 20 kHz→100 Hz over beat 0..1 measures early-seg brightness vs late-seg darkness, pinning smooth tracking across segments. 55228/0 + 443/0 green. |
 
-17. COMPLETENESS PERCENTAGES (estimated, honest)
--------------------------------------------------------------------------------
-- Current milestone spec (A-U table in §2): ~100% of scoped features done.
-- Phase 14 workspaces (WorkspaceManager, Playlist, Channel Rack, Browser,
-  Inspector, menus/commands, .deb packaging): done and test-green.
-- So-called "Beyond" roadmap (buses VM, plugins, automation lanes): 0% wtih
-  Browser/Playlist/Channel Rack now crossed off; still untouched are buses,
-  plugin hosting, and automation lanes.
-- Overall product vision: about 90% (DAW core complete and test-green;
-  remaining ~10% is buses/racks/automation/plugin hosting + human desktop QA).
-- Implementation confidence in correctness: engine/model 95% (54145 checks),
-  UI logic 92% (workspace harness suite ALL OK), visuals/desktop integration
-  65% (renders are pixel-verified offscreen; a real WM session is still the
-  gap).
+## P. Export === live fx cadence (Phase P)
 
-18. VERDICT
--------------------------------------------------------------------------------
-VERDICT: WORKING (fully implemented, all automated tests green), with a
-"NEEDS HUMAN DESKTOP VERIFICATION" tag on desktop integration (icons / taskbar
-/ visual layout under a real WM + physical audio device).
-Phase 14 (workspaces) VERDICT — the Browser / Playlist / Channel Rack /
-Inspector / WorkspaceManager milestone is complete, engine untouched, engine
-suite still 54145/0, harness ALL OK, offscreen smoke alive, and renders are
-pixel-verified (theme tokens, waveforms, clip bodies, violet playhead). The
-same two human-desktop gaps (taskbar/icon/WM_CLASS, real audio device) remain
-and are unchanged.
+| Component | Status | Notes |
+|---|---|---|
+| Mid-segment step audible in export | REAL (DONE Sep 2026) | `fx_automation_midsegment_step_is_audible_in_export`: the LP-curve step at beat 0.2 is heard in the RENDERED wav too (L frames 5000..8191 of the export), proving the offline renderer runs the same every-64-frame sub-block path as the live engine. |
+| Export == live, bit-exact | REAL (DONE Sep 2026) | `fx_automation_export_matches_live_cadence`: one Session, monolithic live `process()` vs `renderToFile` 512-chunk loop — `memcmp`-identical. MasterLimiter is causal and 512 % 64 == 0 keeps sub-block alignment, so the file is the exact monitor sound. |
+| Tests | REAL (DONE Sep 2026) | +14 checks (55228 → 55242/0). Interleaved-window bug hit once during development (fix: index L frames only), then stable. |
 
-Next steps from here (README of where the project stands):
-  1. Human desktop session: `cmake --install --prefix ~/.local build`, then
-     confirm (a) taskbar runs with the misuc icon/WM_CLASS, (b) audio opens a
-     real PipeWire device and monitoring works.
-  2. Everything else is Beyond scope, frozen: buses/routing, plugin hosting
-     (lilv/lv2), automation lanes.
+## Q. Playlist band recording (Phase Q)
 
-=== ICON / TASKBAR VERDICT (the specific one requested) ===
-  - IMPLEMENTED IN CODE: YES — bundled window icons (:qrc /icons/misuc-256.png,
-    misuc-512.png), hicolor set in assets/hicolor (9 sizes incl. 512),
-    assets/desktop/misuc.desktop (Icon=misuc, StartupWMClass=misuc_app), CMake
-    install rules + CPack DEB for all three.
-  - INSTALLED (staged & package-verified): YES — `cmake --install` to a staging
-    prefix lands bin/misuc_app, share/applications/misuc.desktop, and the full
-    hicolor 16→512 set; build/misuc_0.1.0-1_amd64.deb regenerated and inspected
-    (dpkg-deb --info/--contents carry the 512 icon + desktop entry).
-  - ACTUALLY VERIFIED ON A REAL DESKTOP: NO — headless session; no live WM/
-    dock.  .==========================================
-  => VERDICT: "IMPLEMENTED, INSTALLABLE + PACKAGED, STILL REQUIRES HUMAN
-     DESKTOP VERIFICATION" (visual dock/icon check only).
+| Component | Status | Notes |
+|---|---|---|
+| Drag → tape → merge | REAL (DONE Sep 2026) | PlaylistGrid `Drag.liveVal` tracked during a band drag; `liveBandDrag()` exposes it; release emits `bandDragFinished(row, autoIdx)` BEFORE `edited()`. MainWindow collects drag values into `bandTape_` (the live lane is NOT mutated mid-drag) and `onBandDragFinished` merges them (0.01-beat dedup, sorted lower_bound insert) — drag + tape = one undo step. `pollAutomationRecord` rewritten with the drag-defer logic; public `recordAutomationTick()` hook for QA. |
+| QA | REAL (DONE Sep 2026) | `record-band-drag`: fader parked at −12 dB so the recorded value MUST come from the band drag (peak > 0.8 at beat 0.5 asserted). Case cleans up (removes gain lane, restores gainDb=0) so the later `export-ui` loud check stays hot. 443 → 456/0. |
 
-19. EVIDENCE (every claim is backed by the following)
--------------------------------------------------------------------------------
-Engine/model:  54145 checks, 0 failures — `./build/bin/misuc_tests`.
-UI harness:    ALL OK — `env QT_QPA_PLATFORM=wayland /tmp/opencode/prbehave`
-               after the Phase-14 workspace suite (incl. mixer rebuild layout
-               fix); run twice more → still ALL OK.
-WS renders:    `/tmp/opencode/snapshot` → 01_default / 02_pianoroll /
-               03_focus PNGs; pixel analysis confirms clip bodies, waveform
-               peaks, MIDI regions, violet accents and playhead all drawn.
-Packaging:     `cmake --build build --target package` →
-               build/misuc_0.1.0-1_amd64.deb (bin, .desktop, 8 hicolor icons);
-               `dpkg-deb --info` Depends auto-detected;
-               `desktop-file-validate assets/desktop/misuc.desktop` → rc=0.
-Build:         `cmake --build build` → clean.
-Smoke:         `timeout 8 env QT_QPA_PLATFORM=offscreen ./build/bin/misuc_app`
-               → rc=124 (alive at timeout), empty log.
-Icon absence:  `ls /usr/share/icons/hicolor/*/apps/misuc.png` → not found;
-               same for applications/ entries mid check.
-Buses/plugins: grep for bus/routing across engine+ui → only doc comments;
-               pkg-config lv2-0|lilv-0|sratom-0 → "no"; no ~/.lv2.
-Key files:     AudioEngine.{h,cpp} (there is no bus struct; MixerTrackRT is
-               gain/pan/mute/solo+meters only; mix loop AudioEngine.cpp:680-785;
-               record capture :610-640; master pass :790-806; renderToWav
-               :321-381). Session.h (Track/AudioClip; no bus field).
-               MainWindow.cpp (project IO/organization + menus, :151-612;
-               record → :259-328; stage/portable paths :389-403,:480-544).
-               Theme.h + ThemeEngine.cpp (tokens; 8 presets :40-75).
-               Logo.cpp + assets/hicolor + AboutDialog.cpp (branding).
-               MixerPage.cpp (syncToEngine/pollMeters, edits → session+engine).
-               PianoRoll.cpp (1320-line editor, feature set per §7).
-               tests/{test_json,test_record,test_mixer,...}.cpp.
-               ui/CMakeLists.txt (install rules :44-52). tools/rendericons.cpp.
+## R. Export metadata + per-project sample rate (Phase R)
 
-20. FINAL FEATURE STATUS TABLE
--------------------------------------------------------------------------------
-   Feature                      Status         Verified?   Notes
-   Project format (v2 JSON)     COMPLETE       yes (tests) versioned; v1 loads
-   Open/Save/New/SaveAs/Export  COMPLETE       yes (harness) dirty flag + discard
-   Piano-roll editor            COMPLETE       yes (harness) copy/paste/quant/…
-   Audio clip lane + import     COMPLETE       yes (harness) WAV/FLAC/Ogg/AIFF
-   Audio recording              COMPLETE       yes (tests)   playthrough para
-   Playback (MIDI+clips)        COMPLETE       yes (harness) live process()
-   Mixer (gain/pan/mute/solo)   COMPLETE       yes (tests)   flat, no buses
-   Meters (incl. per-track)     COMPLETE       yes (harness) from engine atomics
-   Undo/redo                    COMPLETE       yes (tests)   session snapshots
-   Transport + loop             COMPLETE       yes (harness) ruler-drawn loop
-   Metronome / count-in         COMPLETE       yes (tests)   click + count-in
-   Groove/swing                 COMPLETE       yes (tests)
-   Audio device mgmt            COMPLETE       NOT VERIFIED needs live PipeWire/human
-                                            (live device open not auto-tested)
-   Test tone / monitor          COMPLETE       yes (tests)   live + offline paths
-   Theme engine (8 presets)     COMPLETE       yes (harness) QSettings + file IO
-   Branding (logo/icons/about)  COMPLETE       partial       code green; desktop
-                                                              icon verified NO
-   Export audio (WAV)           COMPLETE       yes (tests)   mixer-accurate
-   Portable asset paths         COMPLETE       yes (both)    write/read rel+abs
-   Autosave/crash recovery      NOT IMPLEMENTED     n/a
-   Splash screen                NOT IMPLEMENTED     n/a
-   Drag-and-drop open           NOT IMPLEMENTED     n/a
-   Buses / routing              NOT IMPLEMENTED     (frozen by audit — spec only)
-   Plugin hosting (LV2/VST3)    NOT IMPLEMENTED     (deps absent; frozen)
-   Browser / sample library     NOT IMPLEMENTED     n/a
-   Step sequencer / channel rack NOT IMPLEMENTED    n/a
-   Playlist / automation lanes  NOT IMPLEMENTED     n/a
+| Component | Status | Notes |
+|---|---|---|
+| Title/artist tags | REAL (DONE Sep 2026) | `Session::artist()` persisted (`metadata.artist`, additive). `writeAudioFile`/`renderToFile` take title/artist → libsndfile `SF_STR_TITLE`/`SF_STR_ARTIST` (RIFF INFO for WAV, Vorbis for FLAC). `readAudioFile` fills `AudioBuffer::title/artist` — tags round-trip through the engine reader. |
+| Per-project sample rate | REAL (DONE Sep 2026) | Project `transport.sampleRate` selects the export frame rate; the native-rate mix is resampled by a new `dsp::resampleLinear` (piecewise-linear, endpoint-preserving) so duration and pitch stay exact at 44.1/96/192 kHz. Engine native 48 kHz unchanged (no-op resample). |
+| UI | REAL (DONE Sep 2026) | ExportDialog: Title/Artist edits + Sample rate combo (prefilled from Session). ProjectPage: Artist field. Headless override: `setExportSampleRateOverrideForTest`. |
+| Tests | REAL (DONE Sep 2026) | `export_metadata_tags_roundtrip` (WAV+FLAC, untagged-empty), `export_sample_rate_44100_resample` (88200 frames @44.1k, tags, peak present), `resample_linear_preserves_sine_pitch` (down- and up-sampled 440 Hz keeps ~2×freq crossings + >0.99 peak), session artist roundtrip. Suite 55270/0 (+28); QA export-ui meta/44100 (+5) 456/0. ASan/UBSan clean. |
 
-21. PHASE 1 UI FOUNDATION REDESIGN  (completed after audit, 2026-09-07)
--------------------------------------------------------------------------------
-   Modular shell + §57 cleanup landed. Baseline held: engine 54145 / 0,
-   harness 213 ALL OK, smoke rc=124, desktop-file-validate rc=0.
-   - Shell: global HeaderBar (brand | transport | CPU/RAM/SR/buffer/xruns/
-     master meters), tabbed workspace (Project|Editor|Audio|Appearance),
-     dockable Mixer, HintBar + hint registry, Workspace presets + layout
-     persistence, F7/F9/Space.
-   - Real metronome: transport click arms engine_.setMetronome (was dead UI).
-   - §57 items 1-3 done: master fader persists (Session transport.masterGainDb,
-     v3-additive), PianoRoll colors tokenized (pixel-identical), first mixer
-     strip follows theme accent.
-   - Theme: ~24 semantic tokens + QSS chrome; editor-neutral tokens fixed.
-   - §57 items 4-7 (512px/scalable icon, StartupWMClass, icon install, .deb)
-     remain for desktop branding phase (spec §58 P2). Live-desktop human review
-     of the new shell still pending.
-   - See MISUC_UI_IMPLEMENTATION_PLAN.txt; spec §70: stop after Phase 1.
-===
-END OF AUDIT UPDATE + PHASE 1 — read-only audit + Phase 1 UI redesign.
-===
+## S. Release packaging (Phase S)
 
-22. PHASE 1.5 ADDENDUM — IDENTIFIED-ON-DESKTOP UI DEFECTS PASS  (2026-09-08)
--------------------------------------------------------------------------------
-   Real-desktop launch (lightdm/X11 session) uncovered four live defects; all
-   four fixed + machine-verified. Engine untouched this pass.
-   - [CRASH] App GP-faulted (SIGSEGV, Qt6Widgets offset 0x1cd358,
-     QWidget::mapFromGlobal) on MouseMove over the transport: HintManager fed a
-     resolver holding a raw TransportBar* during teardown. Fixed by QPointer
-     registry (entries purged on QObject::destroyed), null-guarded eventFilter,
-     and QPointer-captured lambdas in TransportBar::attachHints.
-   - [TRANSPARENT MENUS] last QSS rule "QWidget { background: transparent; }"
-     (equal specificity, last-wins) stripped backgrounds off QMenu/QMenuBar/
-     QToolBar/QStatusBar/QTabBar. Removed; QMenu now opaque panel + violet
-     hover. Ranked: File/Edit/Add/View menus all near-black opaque (@ 83.9%
-     dark region sample) with light-text rows.
-   - [NOT-BLACK THEME] Palette was blue-tinted. New default preset "Misuc
-     Black" (foundation #0a0a0c, panels #101013/#17171b/#050506, borders
-     #232328/#2c2c33, text #ececef/#8b8b94/#56565e, accent #8f7bfa). Legacy
-     "Misuc Graphite" automatically migrated in loadPersisted. Desktop pixel
-     profile: 97.8% dark, chrome avg RGB(17,16,20) colourless, hue 240-330
-     violet-only accents. Hard-coded literals repointed to tokens: mixer strip
-     ladder (violet/slate), ChannelStrip default, VerticalMeter kMeterHot,
-     transport record fill.
-   - [HINTBAR] Unknown-text overlap/clipping replaced by a real layout of five
-     cells [glyph | name | purpose | value | shortcut] with elision; resolves
-     semantics like "Play / Start playback / Stopped / Space".
-   - [TITLE] MainWindow ctor now calls updateWindowTitle(): no phantom dirty
-     star on a fresh launch ("Untitled - Misuc").
-   Verification (this round, after the above edits):
-      qatool hintprobe 8/8    (cells=5, inside, no-overlap, resolver 8/8 via
-        driven cursor incl. mapFromGlobal path at 1.0/1.25/1.5 scale, teardown
-        DURING hover stress -> no crash).
-      qatool behave 26/26, rackaudio 6/6, demoaudio 5/5,
-      audit 0 issues at 1280x720 / 1920x1080 / 3840x2160.
-      Desktop (real session): hover-stormed transport (the exact former crash
-        gesture) -> process alive; File>New Demo Project -> title "Misuc Demo
-        - Misuc", 4 tracks/160 notes; F5/F7/F6/F8 switching -> alive; every
-        global menu opaque-black readable; clean exit (no crash on close).
-      Live-device audio NOT verifiable in this sandbox (no /dev/snd fd can be
-        opened, pipewire socket absent) -> channel-rack -> engine -> WAV path
-        machine-verified offline instead (rackaudio/demoaudio). Environment
-        gate, not a code defect.
-   Human visual check on a normal desktop still requested (icons-perceived
-   clarity, hint-bar aesthetics, general black look).
-===
-END OF PHASE 1.5 — desktop-defect pass.
+| Component | Status | Notes |
+|---|---|---|
+| CPack | REAL (DONE Sep 2026) | `cmake --build build --target package` → `misuc_0.2.0-1_amd64.deb` (SHLIBDEPS) + `misuc-0.2.0-1-linux.tar.gz` (staged layout). Version derives from the canonical `project()` VERSION via generated MisucVersion.h + `${PROJECT_VERSION}` (see docs/MISUC_VERSIONING.txt). |
+| Install hardening | REAL (DONE Sep 2026) | DESTDIR-staged layout verified (bin/misuc_app + misuc_flp, misuc.desktop, hicolor 16..512). Relative `$ORIGIN` RUNPATH, no dev-path leakage; all libs resolve; staged app smoke-runs offscreen (exit 124 = alive). Workflow in `docs/MISUC_VERSIONING.txt`. |
 
-23. PHASE 2 ADDENDUM — REAL ARRANGEMENT WS (regions, seek, patterns, browser)
-------------------------------------------------------------------------------
-(2026-09-08) Completed the second big milestone: the arrangement/music-editor
-workstations are now backed by a real region model and real engine actions,
-closing the "model/UI-only" gaps flagged in §14.3/§4. Highlights, each
-machine-verified below:
+## Lat. Input-latency compensation (Phase Lat)
 
-  1. SESSION REGION MODEL + MIGRATION (engine/model)
-     - MidiRegion { id, name, startBeats, durationBeats, notes[] } added to
-       Track; notes are LOCAL offsets. buildMidiScore flattens to the global
-       timeline (region.startBeats + note.startBeats) when a track has >= 1
-       region; tracks with legacy absolute notes still work.
-     - JSON v2 serialization adds "regions"; the v2 reader folds legacy
-       track.notes into one region and clears them. EVERY loaded project is
-       region-based; the in-memory demo is only realised through openProject,
-       so it always arrives migrated.
-     - addRegion / findRegion / removeRegion / duplicateRegion on Session.
-  2. ENGINE: SEEK + ONE-SHOT SAMPLE PREVIEW
-     - New ControlStream kinds Seek (seekToBeat, parks the playhead) and
-       PreviewSample (previewSample triple-buffers a full decoded sample, RT
-       rendered, ~30 s cap). beginPlay no longer rewinds to 0: Stop rewinds,
-       ruler seeks park the caret, Play resumes from the caret.
-     - Tests preview_sample_headless + seek_transport_headless (test_clips.cpp)
-       are green — suite is now 54199 checks, 0 failures.
-  3. PIANO ROLL — full range + region-bound (PianoRoll.{h,cpp})
-     - Full MIDI range 0..127 (128 rows, velocity lane 56px).
-     - Bound to a Session region: notesRef() routes all 30 edit sites through
-       the region's note list; clip lane is hidden while a region is bound so
-       the grid is uniformly local; region name painted on the ruler.
-     - setTrack binds the first region; setRegion validates; ensureRegion()
-       auto-creates "MIDI 1" (4 beats at 0) on the first drawn note.
-     - Real ruler seek (click -> global-beat transport seek), velocity-lane
-       drag editing, piano-key hover audition (audition(midiNoteToFreq)).
-       horizonBeats follows the region length; auto-follow is region-local.
-  4. PLAYLIST — region-based arrangement editor rewrite (Playlist.{h,cpp})
-     - Items now ARE regions/clips: move / resize / trim / slice, marquee
-       multi-select, copy/paste/duplicate/delete, context menus (Rename,
-       Duplicate, Split at Playhead, Slice Here, Mute/Unmute, Open in Piano
-       Roll, Delete), ruler seek, Ctrl+wheel zoom, slice tool, drag-to-drop
-       audio (addClip). openInPianoRoll carries (trackId, regionId).
-  5. CHANNEL RACK -> REAL REGION  (Place Pattern)
-     - New "Place Pattern" chrome button: materialises the active bank's gated
-       steps into a real 4-beat Session region "Pattern N" on the "Sequencer"
-       track (one 1/16 note per gate at the channel's pitch, 0.24 beats each),
-       positioned after the last region/clip, then switches to the Playlist.
-  6. BROWSER — real sample audition + sample-pack scanning
-     - Preview button now plays the ACTUAL sample file through previewSample
-       (was a synthesized beep). "Scan Sample Pack Folder…" adds arbitrary
-       folders to the recursive scan (Music/Samples/Sounds + project audio).
-       Drag-to-Playlist insert was already real.
-  7. P1: AUDIO BACKEND AUTO-START
-     - AudioSettingsPage::autoStart() opens the engine at launch (48 kHz / 256
-       frames / first enumerated output, inputChannels 0 to maximise success).
-       Failure is silent and surfaceable in Tools > Audio Console. transport.record
-       command now armed through the real record engine+clip-staging path.
-  8. MENUS / COMMANDS / TUTORIAL
-     - Help > "User Guide…" opens a shipped tutorial (:/help/user-guide.txt,
-       resources.qrc) covering the real workflows above.
-  9. KEYBOARD AUDITION FIX
-     - PianoKeys->PianoRoll audition connect ran before keys_ existed (null
-       receiver) — silently dropped. Connection moved after construction; the
-       desktop warning is gone.
+| Component | Status | Notes |
+|---|---|---|
+| Capture offset | REAL (DONE Sep 2026) | `ControlKind::SetCaptureOffset` (d0 = frames) + `AudioEngine::setInputLatencyMsOverride` (>=0 pins explicit ms; <0 uses the backend's `latency().inputMs`). The capture latch is shifted so the take's stored span recenters onto what was heard (10 ms → 480 frames, span ≈1.97–3.97 → ≈1.98–3.98 beats; payload untouched). Default offset 0 keeps headless tests exact. |
+| Accessor | REAL (DONE Sep 2026) | `AudioEngine::captureOffsetFrames()` + `RecordCapture::captureOffsetFrames` survive the take. |
+| Tests | REAL (DONE Sep 2026) | `record_input_latency_compensation_recenters_span`, `record_zero_latency_keeps_baseline_span`, `offline_render_excludes_metronome_clicks`. ASan-clean. |
+| Limitations | DOCUMENTED | Per-track JSON offsets + monitor-playthrough RT delay line out of scope; uniform global latch shift is the honest first pass. |
 
-  Evidence (this round):
-     - ./build/bin/misuc_tests        -> 54199 checks, 0 failures, PASS.
-     - qatool behave                   -> failures=0 (incl. roundtrip-notes via
-                                         regions = 160, pad clip = 1).
-     - qatool placepattern (NEW)       -> 9/9: real QToolButton mouse-click path
-       (press+release on the found Place Pattern button) materialises a
-       "Sequencer" track + "Pattern 1" region (0..4 beats, 4 gated notes,
-       correct pitch/step/duration), second placement stacks at start 4.0.
-     - qatool demoaudio                -> failures=0 (bar-1 peak 0.84, full
-       arrangement 1.11) — the demo now renders through the region model.
-     - Real desktop (X11, QT_QPA_PLATFORM=xcb): app boots, Audio engine
-       auto-started on 'PipeWire' at 48000 Hz (logged), window mapped; F6/F5/F7
-       switches, Space play, R record arm/disarm, Space stop all alive; window
-       pixel profile 95.8% dark with violet-only accents; clean shutdown.
-       The prior "invalid nullptr parameter" PianoKeys connect warning is gone
-       from the launch log.
-     - (Fixed during pass) Track/t in place-pattern lambda needed qualification;
-       <cmath> include added to MainWindow.cpp.
+## PR. Piano-roll toolset + metronome pass (Phase PR)
 
-  Still environment-gated (unchanged): live loudspeaker output (/dev/snd, real
-  PipeWire device) — offline render + NullBackend pipelines are the
-  machine-verifiable substitutes; see the HUMAN-DESKTOP list after §14.4.
-===
-END OF PHASE 2 — real arrangement workspace (regions/seek/patterns/browser).
+| Component | Status | Notes |
+|---|---|---|
+| Velocity nudge | REAL (DONE Sep 2026) | `PianoRoll::nudgeVelocity(int)` (selection-only, clamp 1–127, one undo step); Alt+Up/Down ±1, Shift+Alt ±12. QA `piano-velocity`: real drawing + selection + nudge 100→101. |
+| Metronome sound | REAL | **Comp15 (#12):** Professional percussive click with fast attack, short decay (30ms), and 2nd harmonic for definition. Base freq 1500 Hz (normal), 3000 Hz (accent) for clear distinction. |
+| Metronome volume | REAL (DONE Sep 2026) | `Metronome::volume()`; engine `setMetronome(bool,float,float)` default 0.9 via control `f2` (clamped 0–1 on the RT thread); transport-wheel over the button adjusts ±0.05/0.1. |
+| Count-in cycling | REAL (DONE Sep 2026) | Right-click cycles 2→4→1 beats; left-click toggles on/off. |
+| Persistence | REAL (DONE Sep 2026) | `transport.metronomeOn/metronomeVolume/countInBeats` (additive; schema stays v3). Legacy docs load off/0.9/2.0. `applyMetronomeToEngine()` refreshes bar + engine on every restore path. |
+| Click-free export | REAL (DONE Sep 2026) | `offlineRender_` guard so `process()` never re-ticks mid-bounce (latent leak fixed; regression-tested). |
+| Tests/QA | REAL (DONE Sep 2026) | +24 engine checks (55299/0) + 21 QA checks (477/0). ASan-clean. |
+
+## FLP import completion (Comp10, #7 Parts 3–16)
+
+| Component | Status | Notes |
+|---|---|---|
+| Structural decoder | REAL | Clean-room structural FLP reader (channels/patterns/playlist/mixer/tempo); **zlib-compressed ("zipped") FLdt payloads now inflate** via `inflateZlib` + `rebuildContainer` and decode identically to uncompressed files (F4/F5 legacy wrappers still rejected with a clear error). |
+| Channel-rack materialization | REAL | Every FL channel becomes a track AND a persisted channel-rack row. Sampler channels (FL type 0) become Sampler rows carrying the resolved sample in `soundFile`; pitched generators become Instrument rows (notes play via the generic synth voice). |
+| Unsupported plugin placeholders | REAL | Channels backed by a specific FL plugin (non-empty InternalName) keep their preserved name as an Instrument row and are listed in the import report (`unsupportedPlugins` / `unsupportedPluginNames`); FL plugin binaries are never hosted. |
+| Sample path resolution | REAL | Relative sample paths resolve against the .flp's directory (`importSession(flp, baseDir)`); absolute paths pass through. `samplesFound`/`samplesMissing` count disk truth; missing paths are kept on the row (re-pointable) and reported. |
+| Pattern → timeline | REAL | The busiest arrangement becomes the timeline; one MIDI region per (item, channel) with real per-note timing (24-byte and legacy 8-byte note structs); length from item → pattern Length → last note. Tempo imported; time signature stays 4/4 (documented limitation). |
+| Sampler-note honesty | PARTIAL (documented) | Sampler-channel note hits are still not rendered (Misuc regions are pitched); rows are preserved and auditionable, hits counted + warned. This is stated honestly in the import dialog, not hidden. |
+| Import report | REAL | `FlpImportResult` carries counts (channels/sampler/patterns/notes/regions/clips/sampler hits/samples found+missing, with missing paths + unsupported plugin names); MainWindow's import dialog shows a compact summary. |
+| Real playback | REAL | Imported projects render through the normal transport: QA imports a representative FLP (FL Keys generator w/ 4-beat melody + sampler + missing sample + arrangement), plays it headless and asserts master peak > 0.01. |
+| Import lifecycle | REAL | `MainWindow::importFlpFromPath` (public, dialog-free for QA/tests) adopts the project: `dirty_=true`, cleared project path (must Save As), fresh undo; save adds the Recent entry, import does not; .misuc reopen + playback verified. |
+| Import dirty state | REAL | Import marks the document dirty (autosaved, never silently lost) — the old BROKEN row is retired. |
+| Tests | REAL | +65 unit checks (55818 total), +32 QA checks (787 total); compressed-FLP round-trip, sampler materialization with real/missing WAVs, unsupported-plugin counting, representative-FLP import + play + save/reopen. |
+
+## What's next
+
+- Longer human XRUN soak on live PipeWire (hardware trust for the headroom policy)
+- Metronome pattern-improvement pass (user request: richer click patterns/accents)
+- Per-track latency offsets + monitor-playthrough delay line (Phase Lat follow-up)

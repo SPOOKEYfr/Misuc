@@ -1,0 +1,242 @@
+MISUC BEGINNER TUTORIAL
+=======================
+Everything in this tutorial describes features that build, run, and are
+covered by the automated test suite. If a step does not do something, it is a
+bug — please report it.
+
+Misuc is a multi-track MIDI sequencer and audio editor for Linux. It uses the
+PipeWire sound server for output and input.
+
+
+1) STARTING MISUC
+-----------------
+  From the build directory:
+
+      ./bin/misuc_app
+
+  The main window opens with a transport bar on top, a HintBar below the menu
+  (it shows contextual hints for whatever the mouse is over), a workspace area
+  in the middle, and the mixer dock along the bottom.
+
+  Workspace switcher shortcuts:
+      F5                 Playlist  (arrangement)
+      F6                 Channel Rack (step sequencer)
+      F7                 Piano Roll  (MIDI note editor)
+      F8                 Browser     (sample / instrument / effect browser)
+      F9 or Ctrl+Shift+M Mixer
+
+  The first time you open a project the Browser may spend a moment indexing
+  your user packs — this happens once, and the index is remembered next time.
+
+
+2) THE TRANSPORT
+----------------
+      Space              Play / Stop (rewinds)
+      L                  Loop on/off (the loop region is the selected span)
+      M                  Metronome on/off
+      Meet the click: spin the mouse wheel over the metronome button to set
+      its volume (0–100%); right-click it to cycle the count-in length
+      (2 → 4 → 1 beats) heard before playback starts. Both are saved with
+      the project.
+      N                  Snap to Grid on/off
+      R                  Arm / disarm clip recording (see section 8)
+
+  The transport bar shows the tempo, time signature, and the playhead as
+  bar.beat.sixteenth.subtick (for example "3.2.1.032"). The tempo is edited on
+  the Project page (Tools > Project Setup, or click the Misuc logo); the time
+  signature is shown on the transport readout. Both are saved with the
+  project.
+
+
+3) CHANNEL RACK (F6) — STEP SEQUENCER
+-------------------------------------
+  The Channel Rack is a 16-step grid with four pattern banks. Steps are
+  toggled by clicking a cell; each row is a percussion sound.
+
+  Controls:
+      Add Channel      Adds a row to the rack
+      Pattern 1..4     Switch the active bank
+      Swing slider     Adds humanising swing (0..66 percent)
+      Place Pattern    Materialises the active pattern as a MIDI region in
+                       the Playlist at the current position
+
+  The rack has a fixed default kit (rows map to fixed pitches) and additional
+  rows fall back to the same fallback pitch, so every painted pattern sounds
+  like the instrument it came from.
+
+  The Playlist Paint tool (section 5) paints patterns from exactly this rack.
+
+
+4) PIANO ROLL (F7) — NOTE EDITING
+---------------------------------
+  Select a track, open the Piano Roll, and the notes of the selected MIDI
+  region (or the selected track) are shown for editing.
+
+      Click            Add a note
+      Drag a note      Move it
+      Drag the right edge of a note   Resize its duration
+      Drag the velocity lane at the bottom of the editor
+                       Change a note's velocity (bar height reflects it)
+      Click-drag empty space
+                       Rubber-band select many notes; dragging one selected
+                       note moves the whole group
+      Ctrl+C / Ctrl+V  Copy / paste
+      Ctrl+D           Duplicate
+      Delete / Backspace   Delete selected notes
+      Q                Quantise the selection to the grid
+      Alt+Up / Alt+Down     Nudge the selection's velocity ±1
+      Shift+Alt+Up/Down     Nudge velocity ±12
+      Loop region      The transport loop plays just the selected span
+
+  The ruler shows the transport loop; the looped span is what plays.
+
+
+5) PLAYLIST (F5) — ARRANGEMENT
+------------------------------
+  The Playlist is the song timeline. A row is a track. Each track can carry:
+    - audio clips (from Import Audio, or from recording — see section 8)
+    - MIDI regions (produced by Channel Rack "Place Pattern" and by the
+      Paint tool)
+    - automation lanes (see section 7)
+
+  Importing audio:  Ctrl+I  (Add > Import Audio...) or drag a sound from the
+  Browser directly onto the row — the clip is placed where you drop it.
+
+  The Paint tool (the brush icon at the top of the Playlist) paints Channel
+  Rack patterns as MIDI regions: one stroke of the mouse paints a block of
+  pattern repeats, and the whole stroke is one undo step.
+
+  Clip / region operations from the right-click menu: Rename, Duplicate,
+  Split/Slice at the playhead, Mute (clips), Open in Piano Roll (regions),
+  Delete. Dragging the left or right edge trims/resizes; dragging the body
+  moves it. Snap to Grid (N) controls how far edits jump.
+
+  Audio regions drawn from left to right; the playhead marker shows where the
+  transport currently is.
+
+
+6) MIXER (F9)
+-------------
+  The mixer shows the session tracks plus the master channel.
+
+      Fader              Track gain (-60 to +12 dB)
+      Pan knob           Left / centre / right
+      Mute / Solo        Track gating
+      + Bus              Create a subgroup; tracks route into it
+      FX Slot ("Add FX") Insert an effect onto a track's post-fader chain
+
+  The built-in parametric EQ (`builtin:parametric-eq`) is always available.
+  When LV2 support is present, discovered float-audio plugins are offered too.
+  The master channel has a brickwall peak limiter (ceiling -1 dBFS) that is on
+  by default, so the output never hard-clips.
+
+
+7) AUTOMATION
+-------------
+  Each track row has an automation band along its bottom edge.
+
+      Click in the band       Add an automation point
+      Drag a point            Move it (time is clamped between its neighbours)
+      Double-click a point    Delete it
+      Right-click the band    Choose the automated parameter:
+                              Gain, Volume, or Pan
+      Click the small "R"/tag square at the band's left edge
+                              Arm the lane for live recording
+
+  The curve is applied during playback AND during export: gain and volume
+  scale amplitude, pan moves the stereo position (constant-power).
+
+  Live recording: arm a lane, press Play (Space), move the track fader / pan
+  in the Mixer, and the moves are written into the lane at the exact transport
+  position. Stop, and the whole recording pass is one undo step.
+
+
+8) RECORDING AUDIO
+------------------
+  Audio recording captures the live input (PipeWire) into a take, which is a
+  WAV snapshot saved in the project's audio/ folder.
+
+  1. In the Playlist or Mixer, arm a track (R toggles record arming).
+  2. Press Record (R) or the Record button: input monitoring switches on.
+  3. Press Play (Space): recording captures with the metronome count-in
+     excluded from the take.
+  4. Press Stop: the take appears in the track with its exact transport span
+     and also in the Inspector take list, where it can be placed as a clip,
+     removed, or replaced by another take. Loop-record produces one continuous
+     take across the loop.
+
+  The take list is saved with the project, so alternates survive save/reload.
+
+
+9) BROWSER (F8)
+---------------
+  The Browser has five views: All Samples, Current Project, Favourites,
+  Recent, and Packs.
+
+      All Samples     Every indexed sound from every pack
+      Current Project The audio assets of the current project
+      Favourites      Sounds you have favourited
+      Recent          Sounds you have used recently
+      Packs           Your user packs: first launch probes common sample
+                      folders (e.g. a Windows Downloads/ directory if it
+                      exists) and seeds a persistent pack index. A folder
+                      whose name contains "kit" is marked as a drum kit.
+
+  Use the search box to search filenames across all packs. Drag any sound
+  from the browser onto a Playlist row to insert it as an audio clip — the
+  clip is placed exactly where you drop it, shown with its waveform, and the
+  insert is verified against the audio pipeline (sample-for-sample).
+
+
+10) INSPECTOR (Ctrl+Shift+I)
+----------------------------
+  The Inspector shows properties of the current selection: a track's name,
+  mute/solo, gain, pan, trim-in; the takes of an armed/recorded track; and the
+  FX rack of a track with per-parameter controls. Properties change the
+  model directly and are undoable.
+
+
+11) THEME
+---------
+  Open the Appearance workspace page (it is one of the workspace tabs, like
+  Playlist/Piano Roll). Pick one of the built-in presets, change the accent
+  colour, or toggle the "glass" look. The theme changes immediately and is
+  remembered for next time.
+
+
+12) SAVING, AUTOSAVE AND UNDO
+-----------------------------
+      Ctrl+S                 Save
+      Ctrl+Shift+S           Save As
+      Ctrl+O                 Open
+      Ctrl+Z / Ctrl+Y        Undo / Redo (the standard Linux bindings)
+
+  Projects are saved as `.misuc` JSON documents (schema version 3). While a
+  document is dirty, Misuc writes a crash-recovery snapshot every 90 seconds;
+  if Misuc did not shut down cleanly, the next launch offers to restore the
+  recovery snapshot. Audio you record or import is copied into the project's
+  audio/ folder so the project stays portable.
+
+
+13) EXPORTING AUDIO
+-------------------
+  File > Export Audio (Ctrl+E):
+
+      Format   WAV 32-bit float, WAV 16-bit PCM, or FLAC 16-bit lossless
+      Range    Whole song, Loop region, or the current Selection
+      Dither   Apply TPDF dither on the fixed-word formats (optional)
+
+  Exports use the identical audio path as live playback, so automation,
+  fader, pan, buses, FX, the limiter and the export ceiling (-1 dBFS) all
+  behave the same way offline as they do live.
+
+
+14) GOOD FIRST FLOW
+-------------------
+  1. F6: put a few steps in the Channel Rack.
+  2. F5: select a row, add "Import Audio" (Ctrl+I), and drop a drum loop on it.
+  3. Paint tool: paint a pattern; then Play (Space) and listen.
+  4. Move the mixer fader while playing, with a Playlist automation band
+     armed, and watch the curve write itself.
+  5. F7: open the Piano Roll and add a bass note run over the loop.
+  6. Ctrl+E: export the whole song as a WAV and listen to the bounce.

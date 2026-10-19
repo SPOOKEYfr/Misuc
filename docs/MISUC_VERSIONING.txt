@@ -1,0 +1,83 @@
+MISUC VERSIONING
+================
+
+App version
+-----------
+  Current version:  0.2.0
+  Single source of truth: `project(misuc VERSION ...)` in the top-level
+  `CMakeLists.txt`. CMake generates `ui/src/branding/MisucVersion.h` from
+  `ui/src/branding/MisucVersion.h.in`, and `ui/src/main.cpp` seeds both
+  `QCoreApplication::applicationVersion()` and the CPack package version from
+  that single value. Bump policy: increment the patch on bug-fix releases and
+  the minor on feature releases by editing the `project(... VERSION ...)` line
+  in the top-level CMakeLists.txt only; every consumer follows automatically.
+
+Session (.misuc) format
+-----------------------
+  The on-disk document is JSON with an explicit `schemaVersion`. The parser
+  rejects documents from a future schema version with a clear error instead
+  of mis-reading them.
+
+  Current schema version:  3   (Json::kSchemaVersion, `engine/include/misuc/engine/core/Json.h`)
+
+  Format history:
+    v1 - tracks with MIDI notes.
+    v2 - added tracks with MIDI notes (loader still accepts v1 documents,
+         which load with an empty track list).
+    v3 - added a `format` marker ("misuc.song"), real created/modified UTC
+         stamps, and forward-compat gates (future versions rejected).
+
+  Additive (backward-compatible, no version bump) members added after v3:
+    - top-level `buses` array            (tracks route into a bus)
+    - per-track `fx` array               (LV2 / built-in insert chain)
+    - per-lane automation `armed` flag   (live per-lane record arm)
+    - per-track `takes` array            (record take list)
+    - `transport.metronomeOn`            (click enabled, default false)
+    - `transport.metronomeVolume`        (0.0–1.0, default 0.9)
+    - `transport.countInBeats`           (2.0 / 4.0 / 1.0, default 2.0)
+
+  Documents without these keys load with the empty/neutral default, so old
+  projects remain valid. When a non-additive change to the document structure
+  is made, bump `schemaVersion` and add an entry above.
+
+  Client-side references are stable ids (track id, lane id, bus id), not
+  vector indexes, so they survive reordering and reload.
+
+Portable assets
+---------------
+  Asset paths stored under the project folder are written relative to it
+  (Session::relativizeAssets) and resolved back to absolute paths on load
+  (Session::resolveAssets), so a project folder moves/copies as a unit.
+
+Install layout
+--------------
+  `make install` (or `make install DESTDIR=<prefix>` for a staged install)
+  installs:
+    $prefix/bin/misuc_app            the application
+    $prefix/bin/misuc_flp            FLP structural reader tool
+    $prefix/share/applications/misuc.desktop   desktop entry ("Misuc")
+    $prefix/share/icons/hicolor/{16..512}/apps/misuc.png   icon set
+
+  The default prefix is /usr/local when installing as root; use DESTDIR for
+  an unprivileged stage. Runtime dependencies (Qt6, PipeWire, ALSA,
+  libsndfile) are system packages, so no private libs ship with the app and
+  the binaries carry only a relative `$ORIGIN` RUNPATH. The desktop entry
+  (assets/desktop/misuc.desktop) resolves `misuc_app` from PATH by design,
+  so it works in unqualified form from any install prefix.
+
+Release packaging
+-----------------
+  `cmake --build build --target package` (from a Release build dir) produces
+  two artifacts in the build root:
+    misuc_<ver>-<rel>_amd64.deb           Debian package; dependencies
+                                          derived from the binaries
+                                          (CPACK_DEBIAN_PACKAGE_SHLIBDEPS).
+    misuc-<ver>-<rel>-linux.tar.gz        Plain tarball of the exact staged
+                                          install layout (bin + .desktop +
+                                          hicolor icons).
+
+  Verify a release the same way CI does: `make install DESTDIR=<stage>`
+  into a scratch prefix, smoke-run the staged `misuc_app -platform
+  offscreen`, and confirm the tarball and the .deb contain
+  usr/bin/misuc_app, usr/share/applications/misuc.desktop, and the full
+  icon set.

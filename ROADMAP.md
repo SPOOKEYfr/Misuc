@@ -549,12 +549,136 @@ engine code changed.
   default / piano-roll / focus workspaces (theme tokens present, waveforms and
   clip bodies drawn, violet playhead rendered).
 
+## Phase 15 — Automation lanes (done)
+
+- Per-track gain automation: session `automation` lanes (one point per bar),
+  editable from the playlist ruler band (click to place/overwrite a point, drag
+  to move it, double-click to delete). Undo-tracked; exported to the engine.
+- Engine: `publishAutomation` triple-buffer; per-block linear interpolation
+  between points applied in the live path AND offline renders.
+- Playlist UI: gain lane rendered as a dotted band under each track with point
+  dots and the interpolated line; unattached "floating" points drawn open.
+- Verification: engine automations ramp render (early 0.113 → late 0.240),
+  muted-lane flat render, session roundtrip, and GUI drag/delete via real
+  playlist widgets — qatool 68/0.
+
+## Phase 16 — Buses / routing (done; last of the original "Beyond" DAW graph)
+
+- Session: `Bus{id,name,faderDb,pan,muted,solo}` list in JSON (additive),
+  `Track.busId` routing (empty = master), addBus/removeBus (routed tracks fall
+  back to master), id-counter sweep.
+- Engine: `publishMixer(params, buses)`; BusSlot triple-buffer; kMaxBusCount=16;
+  a post-track, pre-master fold stage applies bus fader/pan/mute/solo with
+  anti-zipper smoothing, honoring any-solo (track or bus) semantics; per-bus
+  peak/RMS/clip meters polled by the UI.
+- Mixer UI: "+ Bus" button, bus strips (bus color band, fader/pan/mute/solo +
+  delete), per-track route combo (MASTER + buses). Session-backed (undo) and
+  live-published to the engine.
+- Verification: engine 54301/0 (bus fader/solo/mute/pan/roundtrip cases),
+  qatool 68/0 (includes a full bus lifecycle driven through the real MainWindow
+  widgets), headful xcb smoke (mixer renders, 272K px body change; bus strip
+  renders — /tmp/misuc_mixer_bus.png).
+
+## Phase 17 — LV2 effect hosting (done)
+
+- Engine: `Lv2Host` (lilv) control-side discovery, instantiation and teardown
+  on the UI thread only; the audio thread renders instances in place
+  (`Lv2Host::run`) in the post-fader, pre-meter fold stage. Offer only float
+  audio plugins with >=1 audio in/out; reject atom/event/cv-output; mono-in
+  feeds the left input, ctrl-out ports get zeroed sinks; staging buffers are
+  `kMaxBlockFrames`. The instance handle is immutable once published, so `run`
+  is real-time safe; teardown is deferred by the audio thread's triple-buffer
+  release (refcounted slot).
+- Hosting rules worth keeping: only control/audio plugin code — instantiation
+  and `freeInstance` never touch the audio thread; `publishFx` lazily creates
+  the host on first use; discovery reads `lilv_port_get_range(plugin, port,
+  &def, &min, &max)` (def is the first returned node); a disabled insert is a
+  pass-through that is NOT re-instantiated; an unknown/unhostable URI yields a
+  null instance and the chain stays dry.
+- Session: `Track.fx` inserts (`TrackFx{id,uri,enabled,params}`), `FxParam`
+  native-unit values, `Session::addFx/removeFx`, normalized id counter, JSON
+  round-trip (additive v4 schema element — old documents load with empty
+  chains; VL docs round-trip even when hosting is absent).
+- Engine API: `discoverFx()` (cached catalog with label/min/max/default), 
+  `fxInfo(uri)`, `publishFx(chains)`, `clearFx()`, `fxSupported()`.
+- UI: MainWindow `applyFxToEngine()` maps session chains into
+  `FxInsertParam` and re-publishes only when the chains actually change (an
+  unrelated edit such as a note drag no longer re-instantiates — and does not
+  reset — the live instances mid-playback). Inspector gains an EFFECTS rack on
+  the selected track: catalog add-combo (+Add), per-insert ON/off toggle,
+  per-param sliders (native min/max/default), and remove. All edits flow
+  through the undo track. `clearSection()` frees the rack via `deleteLater()`
+  so an edit-triggered rebuild cannot destroy the emitting widget inside its
+  own signal (Qt accessibility follow-up crash).
+- QA: `misuc_qa fx` drives the full rack through real widgets
+  (add→toggle→param→render→remove→undo→redo) against the shared engine —
+  qatool 84/0 total; headful xcb smoke launches and runs. Full engine suite
+  green (54427/0).
+- Fixes folded in during bring-up: `findDevices` teardown order in
+  `PipeWireBackend` (loop torn down while its thread still ran), `publishFx`
+  host creation, `lilv_port_get_range` argument order, and the test harness's
+  first-pass render energy ("ghost") — tests warm a fresh engine's very first
+  pass so cross-pass sample comparisons stay deterministic.
+
+## Phase 18 — Core DAW completion + integration (done)
+
+The full arrangement/edit/mix/transport loop is real and proven by ONE
+integrated workflow that drives the real MainWindow offscreen.
+
+- **Integrated workflow test** (`qa/qatool.cpp` `workflow`): one scripted
+  session that (1) draws a note in the piano roll (pitch verified), (2) edits
+  the playlist grid — select, drag a MIDI region +2 beats, Ctrl+D duplicate
+  (exactly one region), Slice tool split, (3) mixes — fader press to ~+6 dB,
+  pan knob, mute/solo with undo/redo, (4) transports — ruler click seeks the
+  engine playhead to beat 2, Play runs and auto-stops exactly at content end,
+  audio renders through the real engine path (peak > 0.01), (5) loops via the
+  Loop action with undo/redo, and (6) saves and reloads the session
+  successfully. Runs from the real MainWindow + AudioEngine; nothing is stubbed.
+  `misuc_qa all` = 181 checks, 0 failures (workflow = 97 of them).
+- **Selection round-trip fix** (`Playlist::selectTrack`): the region press emits
+  `trackSelected` → MainWindow syncs everywhere → `playlist_->selectTrack(id)`,
+  which used to reset the just-created clip/region selection, breaking move and
+  duplicate. Now a re-selection of the already-selected row keeps the item
+  selection.
+- **Toolbar buttons located by objectName**, not tooltips: `HintSystem`
+  intentionally clears widget tooltips at registration, so Slice/Snap/Add are
+  found via `plSelect`/`plSlice`/`plSnap`/`plAdd` object names.
+- **Transport driving model documented in harness**: play/stop/seek/loop are
+  deferred control-queue messages applied on the next `process()` block; after
+  `closeAudio()` the RT thread must be allowed to exit before manual driving;
+  frames = beats · (60/tempo) · sampleRate. The engine stopped at exactly
+  `contentEnd` (playhead 384000 @ 120 bpm) and auto-stopped its playhead.
+- **Mixer rebuild double-free fixed** (`MixerPage::rebuildStrips`): old strips
+  were both `deleteLater()`'d and deleted via the layout teardown (double
+  free), crashing exit/selection-repolish. Teardown now hides → reparents →
+  `deleteLater()`s every child widget and only destroys layout items; nothing
+  is freed synchronously inside an emitting strip's own signal.
+- **No-fake-buttons audit (Phase 18)**: full inventory (~150 controls in 27
+  files) with per-control handler wiring. Fixes from the audit:
+
+  | Flaw | Fix |
+  |---|---|
+  | Playlist `zoomIcon_` was a clickable-looking button with no connect | wired to real zoom-in (1.25×/1.1× steps through `applyZoom`) |
+  | Channel Rack name cell was editable but discards edits (model↔`Channel` desync, never persisted) | `itemChanged` syncs back to `channels_[].name`, persists and marks dirty |
+  | Channel Rack swing moved but never `edited()`, so Pattern Play didn't reflect it live | `setSwing` now fires `edited()` → live score rebuild |
+  | Browser advertised Instruments/Audio Effects/MIDI/Plugins catalogs whose Preview/Insert silently no-oped (no hosting in this build) | categories and fake catalogs removed; browser is an honest samples browser |
+  | Header logo hint claimed "Open the project page" but the logo wasn't clickable | logo is now clickable (opens the Project page); `eventFilter` + `projectRequested` signal |
+- Audit conclusions: every transport control, playlist toolbar/grid gesture,
+  piano-roll tool, mixer strip/bus/master fader, inspector field, channel-rack
+  control, browser button, menu action and hotkey lands in a real engine /
+  session / persistence effect. Remaining honest gaps are only the documented
+  deferrals (VST3/LV2 hosting, plugin catalogs), which are no longer shown as
+  working buttons.
+- Verification: engine **54427 / 0**, `misuc_qa all` **181 / 0** (stable over
+  repeated runs, no teardown crash), headful **xcb smoke** alive + clean
+  SIGTERM with PipeWire engine started.
+
 ## Phase 8+ — Beyond
 
-- VST3/LV2 plugin hosting, buses and routing, recording, rendering, GPU
-  acceleration for the UI when it pays off. Next milestones for the modular
-  shell per §58: desktop branding + .deb (P2), Browser (P3), Channel Rack
-  (P4), Playlist (P5).
+- Remaining: GPU acceleration for the UI when it pays off, live audio-device
+  soak (needs a human desk session). VST3 hosting would reuse the same
+  triple-buffer fold stage. LV2 effect hosting is now crossed off the "Beyond"
+  list.
 
 ## Status conventions
 

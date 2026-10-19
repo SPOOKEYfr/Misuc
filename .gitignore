@@ -8,3 +8,11 @@ build-*/
 .core
 compile_commands.json
 .cache/
+# Debian packages / CPack
+*.deb
+_CPack_Packages/
+
+# Internal dev logs (not for the public repo)
+MISUC_DEVELOPMENT_LOG.txt
+MISUC_MASTER_PROTOCOL.txt
+PHASE3_WORKSPACE_SPEC.txt

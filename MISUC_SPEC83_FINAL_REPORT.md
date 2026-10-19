@@ -143,8 +143,9 @@ Honest limits (accepted, documented; NOT hidden):
       waveform and metadata; audio playback of a drop requires placing the
       sample on the Playlist (which is a real voice).
   [~] Playlist renders the real clip + note-region types the Session stores;
-      pattern / automation "clip types" are NOT fabricated. There are no
-      automation lanes yet (frozen Beyond scope).
+      pattern / automation "clip types" are NOT fabricated. Automation lanes
+      are now IMPLEMENTED (see §5) — the earlier "frozen Beyond" note no
+      longer applies.
   [~] Browser drops reference the sample's original absolute path; the
       project-relative asset staging is still used for the editor import path.
   [~] Channel Rack is a UI/persistence feature — it does not yet drive a drum
@@ -176,10 +177,117 @@ and packaging are in place but headless verification is the limit.
   desktop-file-validate assets/desktop/misuc.desktop    -> rc=0
   cmake --install build --prefix /tmp/mc_b/stage        -> staged layout verified
 
---------------------------------------------------------------------------
+-----------------------------------------------------------------------------
+5. AUTOMATION + BUSES MILESTONE (landed 2026-09-09 ON TOP of §83)
+-------------------------------------------------------------------------------
+Scope: two former "Beyond" items (automation lanes, buses/routing) were
+resumed after the frozen audit and shipped end-to-end. Everything is
+session-backed (undoable), published lock-free to the engine, and honored by
+both live playback and offline export.
+
+A. Automation lanes — DONE (verified)
+   - Session: per-track `automation` array ({param, points[{beat,value}]}),
+     one point per bar, JSON-additive; edited from the playlist ruler band
+     (click=set point, drag=move, double-click=delete).
+   - Engine: publishAutomation(entries) triple-buffer; per-block linear
+     interpolation between points on the audio thread (live + renderToWav).
+   - Verified: ramp automation early=0.113 late=0.240 (values move with the
+     ramp), muted-lane flat render, session roundtrip; GUI lane click/drag/
+     delete through real playlist widgets.
+
+B. Buses / routing — DONE (verified)
+   - Session: root "buses" array (Bus{id,name,faderDb,pan,muted,solo}) +
+     Track.busId (empty=master); addBus/removeBus/findBus; removeBus rewires
+     followers to the master; id-counter sweep on load.
+   - Engine: publishMixer(params, buses) (bus table in its own triple-buffer,
+     kMaxBusCount=16); a post-track pre-master fold stage applies bus
+     fader/pan/mute/solo with anti-zipper smoothing; any-solo spans tracks AND
+     buses (a soloed bus pulls in its non-muted routed tracks; direct-to-master
+     tracks stay silent unless themselves soloed); per-bus peak/RMS/clip meters.
+   - Mixer UI: "+ Bus" header button, bus strip per session bus (bus color
+     band, fader/pan/mute/solo + delete), per-track route combo (MASTER + bus
+     names), undo-tracked.
+   - Verified: engine bus fader/solo/mute/pan/roundtrip+migration cases
+     (54301/0), qatool engine+session bus checks, and a GUI bus lifecycle
+     (create/route/mute/delete) driven through the real MainWindow widgets;
+     bus strip rendering confirmed on pixels
+     (/tmp/misuc_mixer_tracks.png vs /tmp/misuc_mixer_bus.png) and headfully
+     (xcb smoke: mixer workspace renders, 272142 px body change).
+
+C. QA harness superseded: the /tmp/opencode qatool was lost to a /tmp wipe
+   and replaced by the in-repo `qa/qatool.cpp` → `misuc_qa` CMake target
+   (offscreen), `all` = 68 checks / 0 failures (5 consecutive stable runs).
+   Engine remains `./build/bin/misuc_tests` → 54301 checks / 0 failures.
+
+D. LV2 effect hosting — DONE (Phase 17, verified)
+   - Engine: per-track insert chains via lilv (engine/fx/Lv2Host.{h,cpp}).
+     Discovery is cached and float-only (>=1 audio in/out; atom/event/cv
+     outputs rejected so params stay native-unit floats). Instantiate/free are
+     UI-thread-only; the audio thread calls a static run() with
+     triple-buffered per-track FxSlots (current → next → live, refcounted).
+     publishFx caps chains (kMaxInsertCount x kMaxTrackCount); disabled
+     inserts are pass-through and never re-instantiated; unknown/unhostable
+     URIs yield a null instance → chain stays dry; MISUC_LV2=0 degrades to
+     inert-but-round-tripping. Stage sits post-fader, pre-meter in live
+     process() and renderToWav.
+   - Session: Track.fx inserts {id, uri, enabled, params{port→float}}, JSON-
+     additive (old docs load with empty chains), addFx/removeFx + id sweep,
+     all undo-tracked.
+   - UI: applyFxToEngine() re-publishes only when chains change (lastFxChains_
+     guard); Inspector EFFECTS rack (catalog combo + Add, ON/off toggle, remove
+     ×, per-param QDoubleSpinBox stepped from min..max..default); the host
+     frees via deleteLater() so a rebuild never destroys the emitting widget
+     inside its own signal (Qt accessibility follow-up UAF crash — fixed).
+   - Verified: engine suite 54427 checks / 0 failures (delay insert changes
+     the render tail, unknown URI ignored + session untouched, capping,
+     roundtrip, discovery; warm-up first pass + per-pass asserts contain the
+     "ghost" first-render overdub); qatool 84/0 incl. fx-ui — add→enable→param→
+     offline render→remove→undo→redo through real widgets (real mouse
+     postPress/postRelease for the checkable toggle); headful xcb smoke alive.
+     mda-lv2 Delay exercised when installed; otherwise chains dry-skip.
+   - Defects fixed in flight: lilv_port_get_range arg order; never free the
+     lilv world plugin collection; #ifdef MISUC_LV2 closed inside the anon
+     namespace; Qt `slots` macro = empty (renamed local); the checkable-button
+     UAF (deleteLater); test_audio live `audible` flake → bounded 200x10 ms
+     poll. Documented in ROADMAP.md Phase 17.
+
+Remaining honest limits (updated scope gates):
+   [x] Plugin hosting: LV2 implemented + green; VST3 not scheduled (frozen).
+   [x] GPU acceleration for the UI: environment-blocked; frozen.
+   [x] Live audio-device soak still needs ONE human session on a real WM with
+       a physical device (icon/taskbar/WM_CLASS + input monitoring + hearing
+       the live FX rack).
+
+-----------------------------------------------------------------------------
+PHASE 18 ADDENDUM — CORE DAW COMPLETION + INTEGRATION (2026-09-09)
+-----------------------------------------------------------------------------
+   - Integrated workflow: ONE scripted end-to-end run drives the real
+     MainWindow + AudioEngine offscreen — piano-roll note draw, playlist
+     region select/drag/duplicate/slice, mixer fader + pan + mute with
+     undo/redo, ruler seek, real audio playback that auto-stops at content
+     end, loop toggle, and a save/load round-trip. Nothing stubbed; asserts
+     land on the session document and the rendered audio. misuc_qa all =
+     181 checks, 0 failures (workflow = 97).
+   - Real bugs found and fixed:
+     * Playlist::selectTrack clobbered the just-created item selection when
+       the region-press track sync re-selected the same row (broke move and
+       duplicate) → same-row guard.
+     * MixerPage::rebuildStrips double-freed strips (deleteLater + layout
+       teardown delete) → crash at teardown and on selection repolish; teardown
+       now schedules every child for deleteLater and only destroys layout items.
+     * No-fake-buttons audit fixes: Playlist zoom icon (no handler) now zooms;
+       Channel Rack name edit discarded → synced+persisted; swing now fires
+       edited() live; Browser's fake Instruments/Effects/MIDI/Plugins catalogs
+       removed (Preview/Insert silently no-oped); Header logo now clickable.
+   - Verified: engine 54427/0, misuc_qa all 181/0 (stable across repeated
+     runs), headful xcb smoke alive 8 s + clean SIGTERM with PipeWire
+     engine started. VST3 hosting remains the single scoped Beyond deferral.
+-----------------------------------------------------------------------------
 VERDICT: ALL 18 PLAN ITEMS COMPLETE. Engine green, QA tool green (audit /
 behave / inspect), packaging green (incl. 512px icons), docs and commits in
-place. Remaining open work is explicitly-scoped Beyond (buses/routing,
-plugin hosting, automation lanes) plus the single human-desktop verification
-session.
+place. Follow-on milestones shipped on top — automation lanes + buses, then
+Phase 17 LV2 effect hosting, then Phase 18 DAW completion + integration:
+engine 54427/0, misuc_qa all 181/0, headful xcb smoke green. Remaining open
+work is explicitly-scoped Beyond (VST3 hosting, GPU acceleration) plus the
+single human-desktop verification session.
 ===============================================================================

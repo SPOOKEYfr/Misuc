@@ -124,23 +124,56 @@ this queue at the top of each audio callback and applies changes.
   the transport-quantized groove, master-gain and monitor-gain smoothing
   (one-pole coefficient 0.004), mixes monitored input into the output bus, and
   produces L/R output + input `MeterSnapshot`s.
-  - **Per-track mixer stage** (`MixerTrackParam`: gainDb, pan, mute, solo):
-    notes and clips enter per-track staging buffers, then each track passes
-    through a smoothed gain fader and a constant-power `dsp::panLaw` (centre =
-    0.707 per channel) into a common output bus. Separate `Smoother`s are
-    created per track on construction (coefficient 0.004, gain reset 1.0,
-    panL/panR 0.707106781), so mixer edits land sample-accurately without
-    re-scanning notes or re-publishing scores.
-  - Any-solo gating: a track is audible iff `!mute && (!anySolo || solo)`.
-    Per-track meters measure **post-gain, pre-mute/solo** signal (the real
-    audible level) and are polled through non-blocking atomics
-    (`trackMeterPeakL/R`, `trackMeterRmsL/R`, `trackMeterClipped`);
-    `kMaxTrackCount = 32`. The per-track section of `process()` runs in
-    `kMaxBlockFrames = 8192` chunks so huge offline/export blocks never
-    allocate on the audio thread. Export (`renderToWav`) flows through the same
-    live `process()` path, so the bounce honors the mixer exactly.
-  - `publishMixer(...)` / `clearMixer()` carry the mixer params through the
-    existing lock-free control queue from the UI thread.
+- **Per-track mixer stage** (`MixerTrackParam`: gainDb, pan, mute, solo,
+     busIndex): notes and clips enter per-track staging buffers, then each
+     track passes through a smoothed gain fader and a constant-power
+     `dsp::panLaw` (centre = 0.707 per channel). Separate `Smoother`s are
+     created per track on construction (coefficient 0.004, gain reset 1.0,
+     panL/panR 0.707106781), so mixer edits land sample-accurately without
+     re-scanning notes or re-publishing scores.
+   - **Bus stage** (`MixerBusParam`: faderDb, pan, mute, solo): a track whose
+     `busIndex >= 0` folds its post-track-gain, post-pan scratch into the
+     destination bus (bus index space = session bus order) instead of the
+     master. Each bus applies its own smoothed fader + constant-power pan and a
+     mute gate; bus outputs sum into the master. The bus table (up to
+     `kMaxBusCount = 16`) is carried by a second triple-buffer
+     (`BusSlot`/`busSlots_`/`liveBusSlot_`) published through the same
+     lock-free control queue.
+   - Any-solo gating (track AND bus): a track is audible iff
+     `!mute && (!anySolo || t.solo || bus.solo)` where `anySolo` covers any
+     soloed track OR bus; a muted bus is silent even if soloed. Per-track
+     meters measure **post-gain, pre-mute/solo** signal; per-bus meters measure
+     the post-fader bus signal; both are exposed via non-blocking atomics
+     (`trackMeter*`, `busMeter*`); `kMaxTrackCount = 32`. The per-track and
+     per-bus sections of `process()` run in `kMaxBlockFrames = 8192` chunks so
+     huge offline/export blocks never allocate on the audio thread. Export
+     (`renderToWav`) flows through the same live `process()` path, so the
+     bounce honors the mixer and the bus table exactly.
+   - `publishMixer(params, buses)` / `clearMixer()` carry the mixer and bus
+     params through the existing lock-free control queue from the UI thread.
+- **Automation stage**: `publishAutomation(entries)` publishes per-track
+      parameter lanes (gain) through the same queue; the audio thread
+      interpolates linearly per block between the lane's points (one bucket per
+      bar) and applies the smoothed value in the same place as the static mixer
+      gain, so the lane is honored by live playback and export alike.
+   - **FX insert stage** (Phase 17): `publishFx(chains)` publishes per-track
+     post-fader chains (`kMaxTrackCount` tracks × ordered inserts) through the
+     same lock-free queue. Each insert is either a `nullptr` (unknown/hostless
+     URI → the chain stays dry) or an owned `Lv2Host` instance handle that is
+     immutable once published; the audio thread renders only the enabled
+     inserts in place after the fader/pan/automation stage and before the
+     meters. Handles are handed back with a release counter so the publishing
+     (UI) thread frees an old instance only after the audio thread dropped it —
+     the same real-time-safe teardown the score and mixer buffers use.
+   - `Lv2Host` (`fx/`): the **only** component that talks to lilv, and it does
+     so on the control/UI thread exclusively. `discoverFx()` is cached and
+     offers only float-only effects with ≥1 audio input and ≥1 audio output
+     (atom/event/cv-output plugins rejected); ranges come from
+     `lilv_port_get_range(plugin, port, &def, &min, &max)`. `run()` is a
+     static, heap-free, in-place fold (`out` may alias `in`); `enabled=false`
+     is a copy-only pass-through and a disabled instance is not re-created.
+     When lilv is absent (`MISUC_LV2=0`) the host degrades to empty/false and
+     the chains stay inert — sessions still round-trip.
 
 > Known wrinkle (to be cleaned up if sanitizers flag it): `setMasterGainDb`,
 > `setTestTone` and `setMonitorGainDb` also mutate fields directly on the UI
@@ -157,6 +190,14 @@ this queue at the top of each audio callback and applies changes.
   carry an ordered list of `AudioClip`s (name, source file, start/duration in
   beats, sample rate, channels); the field is optional so version-1
   documents (no tracks) and v2 documents without clips still load.
+  - **Buses**: a root `"buses"` array (`Bus{id,name,faderDb,pan,muted,solo}`)
+    plus an optional per-track `"busId"` (empty/absent = master). Both are
+    additive — legacy v2 docs load with zero buses and unchanged playback.
+    `addBus(name)`/`removeBus(id)`/`findBus` manage the list; `removeBus`
+    re-routes followers to the master so no dangling references survive.
+  - **Automation lanes**: per-track `"automation"` entries
+    (`{param, points[{beat,value}]}`, one point per bar) persisted in the same
+    additive way; the playlist ruler edits these directly.
   **Portable asset paths** (Item #5): `Session::relativizeAssets(baseDir)` /
   `resolveAssets(baseDir)` convert every clip path that lives under `baseDir`
   between absolute and project-relative form, so a saved `.misuc` travels
@@ -276,18 +317,21 @@ gestures emit `PianoRoll::audition(freq, velocity)` (add / drag / click),
   controls master and monitor gain, and shows live output/input meters with
   clip LEDs.
 - **Mixer** page (`ui/src/mixer/`) — the real mixer panel: one `ChannelStrip`
-  per track (color dot, pan `Knob` −100…+100, M/S buttons, vertical stereo
-  `VerticalMeter` with RMS fill / peak-hold cap / clip LED, dB `Fader` −60…+12
-  with wheel fine-tune and double-click-to-0, plus a gain readout) and a Master
-  strip (fader + stereo meter) at the right. Strips are plain views over the
-  shared Session: user edits become session mutations via `edited()` and land on
-  the same undo stack as every other edit. `syncToEngine()` re-publishes the
-  track mixer params (`publishMixer`) from every session change, and
-  `pollMeters()` (on the main window's 30 Hz tick) pulls the per-track physics
-  from the engine atomics. Track selection is mirrored both ways between the
-  editor's track list and the strips. The `MixerPage` rebuilds its rack when the
-  track set changes and otherwise only mirrors values, so a fader drag is never
-  interrupted.
+  per track (color dot, route `QComboBox` (MASTER or a named bus), pan `Knob`
+  −100…+100, M/S buttons, vertical stereo `VerticalMeter` with RMS fill /
+  peak-hold cap / clip LED, dB `Fader` −60…+12 with wheel fine-tune and
+  double-click-to-0, plus a gain readout), a bus strip per session bus (bus
+  color band, fader/pan/mute/solo + a delete button; routed tracks feed its
+  fader), and a Master strip (fader + stereo meter) at the right. A "+ Bus"
+  header button adds a session bus. Strips are plain views over the shared
+  Session: user edits become session mutations via `edited()` and land on the
+  same undo stack as every other edit. `syncToEngine()` re-publishes both the
+  track mixer params and the bus table (`publishMixer(params, buses)`) from
+  every session change, `pollMeters()` (on the main window's 30 Hz tick) pulls
+  the per-track and per-bus physics from the engine atomics. Track selection is
+  mirrored both ways between the editor's track list and the strips. The
+  `MixerPage` rebuilds its rack when the track or bus set changes and otherwise
+  only mirrors values, so a fader drag is never interrupted.
 - **Appearance** page (`ui/src/theme/ThemePage.{h,cpp}`) — presets, custom
   accent, glass toggle, Save/Load `.misuctheme`, all applied live through the
   theme engine.
@@ -350,6 +394,18 @@ workspaces, all owned by one object:
   so edits are undo-tracked and reach the engine score, mixer, and playlist.
   Numeric/metadata rows that owning workspaces edit (start/length, notes)
   stay read-only mirrors.
+- **FX rack** (in the track view, Phase 17): below the property grid the
+  EFFECTS section lists each insert — resolved name (from the engine catalog),
+  ON/off toggle (`fx.<id>.enable`), one native-unit slider per parameter
+  (range from `FxParamInfo` min/max/default, value from the session or the
+  default), a remove `x` (`fx.<id>.remove`), and an add-combo filling the
+  catalog from `discoverFx()` + an Add button (`fx.add` = plugin URI). All
+  edits emit `editRequest` and land in `Session`/undo like any other row.
+  `MainWindow::buildFxSlots/buildFxCatalog` resolve view models; the rack is
+  rebuilt on every inspector refresh but the section host is released with
+  `deleteLater()` so the emitting widget survives its own edit-triggered
+  rebuild (Qt's follow-up accessibility update would otherwise crash on a
+  freed button).
 - **Commands** (`ui/src/commands/MisucCommandRegistry`) and **tooltips**
   (`ui/src/tooltip/MisucTooltip`) stay the single source of truth for menus,
   header buttons, and hint text; `buildCommands()` in MainWindow registers
@@ -372,9 +428,12 @@ AudioEngine::process (AudioRenderer; input + output)
         │  triple-buffer snapshot published by the UI on every edit)
         │  + ClipPlayer sidechain (audio-clip slots from AudioEngine::setClips)
         │  + wall-clock preview notes (audition; independent of transport)
-        │  per-track mixer stage: smoothed gain → constant-power pan →
-        │  mute/solo (anySolo) gating → common bus; track meters (post-gain,
-        │  pre-gate) via atomics
+        │  per-track mixer stage: smoothed gain (+ automation ramp gain) →
+        │  constant-power pan → mute/solo (anySolo track-or-bus) gating →
+        │  post-fader FX inserts (chain of enabled Lv2 instances, in place) →
+        │  bus fold or master; track meters (post-gain, pre-gate) via atomics
+        │  bus stage: smoothed bus fader → constant-power bus pan → bus mute
+        │  gate → sum into master; per-bus meters via atomics
         │  monitored input → monitor gain smoother → output bus
         │  master-gain smoothing
         │  gather output + input MeterSnapshot

@@ -147,14 +147,13 @@ jobs:
           packaged test suites run green in CI for both platforms.
           EOF
           files=$(find release-assets -type f \( -name "*.deb" -o -name "*.exe" \) -printf "%p ")
-          if ! gh release create "$GITHUB_REF_NAME" \
-             --repo "$GITHUB_REPOSITORY" \
+          repo_args=(--repo "$GITHUB_REPOSITORY")
+          if ! gh release create "$GITHUB_REF_NAME" "${repo_args[@]}" \
              --title "Misuc ${{ github.ref_name }} - Linux .deb + Windows .exe" \
              --notes-file notes.md $files; then
             # Release exists already (re-pointed tag): refresh assets + text.
-            gh release upload "$GITHUB_REF_NAME" --clobber $files
-            gh release edit "$GITHUB_REF_NAME" \
-              --repo "$GITHUB_REPOSITORY" \
+            gh release upload "$GITHUB_REF_NAME" "${repo_args[@]}" --clobber $files
+            gh release edit "$GITHUB_REF_NAME" "${repo_args[@]}" \
               --title "Misuc ${{ github.ref_name }} - Linux .deb + Windows .exe" \
               --notes-file notes.md
           fi

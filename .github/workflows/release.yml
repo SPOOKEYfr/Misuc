@@ -146,8 +146,15 @@ jobs:
           behaviour on real hardware is not yet validated; the engine, UI and
           packaged test suites run green in CI for both platforms.
           EOF
-          gh release create "$GITHUB_REF_NAME" \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "Misuc ${{ github.ref_name }} - Linux .deb + Windows .exe" \
-            --notes-file notes.md \
-            $(find release-assets -type f \( -name "*.deb" -o -name "*.exe" \) -printf "%p ")
+          files=$(find release-assets -type f \( -name "*.deb" -o -name "*.exe" \) -printf "%p ")
+          if ! gh release create "$GITHUB_REF_NAME" \
+             --repo "$GITHUB_REPOSITORY" \
+             --title "Misuc ${{ github.ref_name }} - Linux .deb + Windows .exe" \
+             --notes-file notes.md $files; then
+            # Release exists already (re-pointed tag): refresh assets + text.
+            gh release upload "$GITHUB_REF_NAME" --clobber $files
+            gh release edit "$GITHUB_REF_NAME" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Misuc ${{ github.ref_name }} - Linux .deb + Windows .exe" \
+              --notes-file notes.md
+          fi

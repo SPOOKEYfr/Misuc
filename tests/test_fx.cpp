@@ -145,9 +145,9 @@ TEST_CASE(fx_host_discovery_lists_effects) {
   TEST_ASSERT(engine.fxInfo(misuc::engine::kBuiltinEqUri) != nullptr);
   TEST_ASSERT(engine.fxInfo("urn:nope") == nullptr);
   if (!engine.fxSupported()) {
-    // Build without lilv: exactly the built-ins, and the unknown lookup stays
-    // a graceful nullptr.
-    TEST_ASSERT(fx.size() == 1);
+    // Build without lilv (Windows): exactly the two built-ins (Eq + Comp);
+    // the unknown lookup stays a graceful nullptr.
+    TEST_ASSERT(fx.size() == 2);
     return;
   }
   TEST_ASSERT(!fx.empty());

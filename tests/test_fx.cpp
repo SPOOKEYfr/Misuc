@@ -339,7 +339,8 @@ TEST_CASE(fx_automation_midsegment_step_is_audible_in_export) {
   misuc::engine::buildMidiScore(s, notes);
   brightEngine.setScore(notes);
   brightEngine.publishFx(chain);
-  const std::string brightPath = "/tmp/misuc_fx_export_bright.wav";
+  const std::string dir = misuc::test::makeTempDir("misuc_fx_export_bright");
+  const std::string brightPath = dir + "/bright.wav";
   TEST_ASSERT(brightEngine.renderToWav(brightPath, 0.0, 4.0, 2, err));
 
   // Automating the same insert offline.
@@ -349,7 +350,8 @@ TEST_CASE(fx_automation_midsegment_step_is_audible_in_export) {
   stepEngine.setScore(notes);
   stepEngine.publishFx(chain);
   stepEngine.publishAutomation({lp});
-  const std::string stepPath = "/tmp/misuc_fx_export_step.wav";
+  const std::string dir2 = misuc::test::makeTempDir("misuc_fx_export_step");
+  const std::string stepPath = dir2 + "/step.wav";
   TEST_ASSERT(stepEngine.renderToWav(stepPath, 0.0, 4.0, 2, err));
 
   misuc::audio::AudioBuffer u, d;
@@ -420,7 +422,8 @@ TEST_CASE(fx_automation_export_matches_live_cadence) {
   render.setScore(notes);
   render.publishFx(chain);
   render.publishAutomation({lp});
-  const std::string outPath = "/tmp/misuc_fx_export_live.wav";
+  const std::string dir = misuc::test::makeTempDir("misuc_fx_export_live");
+  const std::string outPath = dir + "/live.wav";
   TEST_ASSERT(render.renderToWav(outPath, 0.0, 4.0, 2, err));
 
   misuc::audio::AudioBuffer wav;

@@ -44,11 +44,9 @@ namespace {
 std::atomic<int> gCounter{0};
 
 std::string tmp(const char* suffix) {
-  static const std::string pid =
-         std::to_string(misuc::test::processId());
-  return "/tmp/misuc_export_" + pid + "_" +
-         std::to_string(static_cast<long long>(gCounter.fetch_add(1))) +
-         suffix;
+  static const std::string root = misuc::test::makeTempDir("misuc_export");
+  return root + "/" +
+         std::to_string(gCounter.fetch_add(1)) + suffix;
 }
 
 // Stereo pure sine, amp-scaled: a clean, band-limited test signal.

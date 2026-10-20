@@ -19,7 +19,11 @@ using misuc::audio::writeWavSamples;
 
 namespace {
 
-constexpr char kPath[] = "/tmp/misuc_wavfile_test.wav";
+// Runtime path: temp dir must exist before the file lands (POSIX-style
+// constant "/tmp/..." is not creatable on Windows).
+static const std::string kDir = misuc::test::makeTempDir("misuc_wavfile_test");
+static const std::string kPathStr = kDir + "/test.wav";
+#define kPath kPathStr.c_str()
 constexpr double kPi = 3.14159265358979323846;
 
 std::vector<float> tone(uint64_t frames, float loopAmp, float rightScale) {

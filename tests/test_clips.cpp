@@ -33,10 +33,9 @@ namespace {
 std::atomic<int> g_tempCounter{0};
 
 std::string tempPath(const char* suffix) {
-  static const std::string pid =
-      std::to_string(misuc::test::processId());
+  static const std::string root = misuc::test::makeTempDir("misuc_clip_test");
   const int n = g_tempCounter.fetch_add(1);
-  return "/tmp/misuc_clip_test_" + pid + "_" + std::to_string(n) + suffix;
+  return root + "/" + std::to_string(n) + suffix;
 }
 
 // Writes a mono sine tone WAV and returns its path.

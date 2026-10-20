@@ -339,7 +339,8 @@ TEST_CASE(mixer_export_honors_mixer_state) {
   engine.publishMixer(std::vector<misuc::engine::MixerTrackParam>{
       {0.f, -1.f, false, false}, {0.f, 0.f, true, false}});
 
-  const std::string outPath = "/tmp/misuc_mixer_export_t.wav";
+  const std::string dir = misuc::test::makeTempDir("misuc_mixer_export_t");
+  const std::string outPath = dir + "/t.wav";
   std::string err;
   TEST_ASSERT(engine.renderToWav(outPath, 0.0, 6.0, 2, err));
 
@@ -447,14 +448,16 @@ TEST_CASE(automation_export_honors_curve) {
   engine.setTempo(120.0);
   engine.setScore(std::move(notes));
 
-  const std::string unityPath = "/tmp/misuc_auto_export_unity.wav";
+  const std::string dir = misuc::test::makeTempDir("misuc_auto_export_unity");
+  const std::string unityPath = dir + "/unity.wav";
   std::string err;
   TEST_ASSERT(engine.renderToWav(unityPath, 0.0, 2.0, 2, err));
 
   const std::string lid = engineAddGainLaneWithDip(s, tid);
   TEST_ASSERT(!lid.empty());
   engine.publishAutomation(automationFromSession(s));
-  const std::string dipPath = "/tmp/misuc_auto_export_dip.wav";
+  const std::string dir2 = misuc::test::makeTempDir("misuc_auto_export_dip");
+  const std::string dipPath = dir2 + "/dip.wav";
   TEST_ASSERT(engine.renderToWav(dipPath, 0.0, 2.0, 2, err));
 
   misuc::audio::AudioBuffer u, d;

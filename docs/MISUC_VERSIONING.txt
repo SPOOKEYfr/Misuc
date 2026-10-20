@@ -76,6 +76,25 @@ Release packaging
                                           install layout (bin + .desktop +
                                           hicolor icons).
 
+  On Windows the CPack generators switch to NSIS + ZIP, producing
+    misuc-<ver>-<rel>-win64.exe           Double-click installer (NSIS);
+                                          windeployqt runs inside the CPack
+                                          staging tree so the installed app
+                                          carries its Qt runtime (incl. the
+                                          MSVC redist DLLs).
+    misuc-<ver>-<rel>-win64.zip           Portable layout of the same tree
+                                          (runs without installer writes,
+                                          but still needs the VC redist or
+                                          the installer's runtime step).
+
+GitHub releases
+---------------
+  The `release` workflow (.github/workflows/release.yml) fires on `v*` tag
+  pushes: it builds + tests + packages on both runners, then publishes one
+  GitHub Release with the platform assets attached (currently .deb for
+  Linux and .exe for Windows). Tag a release with:
+    git tag v<something> && git push origin v<something>
+
   Verify a release the same way CI does: `make install DESTDIR=<stage>`
   into a scratch prefix, smoke-run the staged `misuc_app -platform
   offscreen`, and confirm the tarball and the .deb contain

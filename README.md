@@ -5,8 +5,9 @@
 <h1 align="center">Misuc</h1>
 
 <p align="center">
-  A Linux-first digital audio workstation — pattern sequencer, piano roll,<br/>
-  playlist and a PipeWire-powered mixer, built with Qt 6 / C++20.
+  A digital audio workstation — pattern sequencer, piano roll,<br/>
+  playlist and a live mixer, built with Qt 6 / C++20. Linux (PipeWire)<br/>
+  is the daily-driver platform; a Windows build ships installers too.
 </p>
 
 <p align="center">
@@ -54,6 +55,19 @@
   (`misuc.meta` + `misuc.song`), atomic writes, rotated autosave with
   round-trip verification, session recovery, clipboard-safe undo/redo
   (50-step snapshot stack).
+
+## Download
+
+Prebuilt installers are attached to tagged GitHub Releases
+([latest](https://github.com/SPOOKEYfr/Misuc/releases)):
+
+| Platform | File | How to install |
+| --- | --- | --- |
+| Linux (.deb) | `misuc_0.3.0-1_amd64.deb` | `sudo apt install ./misuc_0.3.0-1_amd64.deb` |
+| Windows (.exe) | `misuc-0.3.0-1-win64.exe` | Double-click the installer (installs into `C:\Program Files\Misuc`) |
+
+The Windows audio backend (WASAPI) has not been validated on real hardware
+yet — on Linux, Misuc talks to a running PipeWire daemon.
 
 ## Building
 

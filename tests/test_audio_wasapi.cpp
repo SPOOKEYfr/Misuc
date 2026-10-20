@@ -42,6 +42,14 @@ TEST_CASE(wasapi_stream_lifecycle) {
   AudioConfig cfg;
   std::string err;
   std::printf("  [dbg] s1 backend.open\n");
+  // Headless runners cansometimes expose a phantom default endpoint that
+  // "opens" but has zero enumerable devices; a real render cycle is not
+  // deducible without a device, so skip instead of validating nothing.
+  if (backend.enumerateDevices(false).empty() &&
+      backend.enumerateDevices(true).empty()) {
+    std::printf("  (no WASAPI endpoint; skipped)\n");
+    return;
+  }
   if (!backend.open(cfg, err)) {
     std::printf("  (no WASAPI endpoint; skipped: %s)\n", err.c_str());
     return;

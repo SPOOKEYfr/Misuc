@@ -37,7 +37,22 @@ TEST_CASE(device_enumeration) {
 // Regression: opening, running, and tearing down the engine repeatedly must
 // not deadlock or corrupt the heap (the loop thread must be quiesced before
 // local callback state is freed). Skipped gracefully when no daemon exists.
+
+// CI runners (and any headless box) expose no PipeWire service: open() can
+// still succeed against a stub but a real start is impossible without an
+// endpoint, so live cases check this first (same policy as the WASAPI suite).
+static bool pwEndpointsAvailable() {
+  PipeWireBackend probe;
+  return !(probe.enumerateDevices(false).empty() &&
+           probe.enumerateDevices(true).empty());
+}
+
 TEST_CASE(stream_lifecycle) {
+  if (!pwEndpointsAvailable()) {
+    std::printf("  (no PipeWire endpoints; skipped)\n");
+    return;
+  }
+
   AudioEngine engine(std::make_unique<PipeWireBackend>());
   AudioConfig cfg;
   std::string err;
@@ -64,6 +79,11 @@ TEST_CASE(stream_lifecycle) {
 // Phase 6: the piano-roll score must actually sound while the transport plays,
 // through the real-time triple-buffer handoff. Daemon-gated like the others.
 TEST_CASE(midi_playback_lifecycle) {
+  if (!pwEndpointsAvailable()) {
+    std::printf("  (no PipeWire endpoints; skipped)\n");
+    return;
+  }
+
   AudioEngine engine(std::make_unique<PipeWireBackend>());
   AudioConfig cfg;
   std::string err;
@@ -103,6 +123,11 @@ TEST_CASE(midi_playback_lifecycle) {
 // Phase 7: note audition must sound through the wall-clock preview path even
 // while the transport is stopped, with no score set. Daemon-gated.
 TEST_CASE(midi_preview_lifecycle) {
+  if (!pwEndpointsAvailable()) {
+    std::printf("  (no PipeWire endpoints; skipped)\n");
+    return;
+  }
+
   AudioEngine engine(std::make_unique<PipeWireBackend>());
   AudioConfig cfg;
   std::string err;
@@ -145,6 +170,11 @@ TEST_CASE(midi_preview_lifecycle) {
 // the engine must survive enabling/disabling it plus input capture config.
 // Daemon-gated like the other live tests.
 TEST_CASE(groove_and_capture_lifecycle) {
+  if (!pwEndpointsAvailable()) {
+    std::printf("  (no PipeWire endpoints; skipped)\n");
+    return;
+  }
+
   AudioEngine engine(std::make_unique<PipeWireBackend>());
   AudioConfig cfg;
   cfg.inputDeviceId = "2"; // any real or fake id; only checks it doesn't crash

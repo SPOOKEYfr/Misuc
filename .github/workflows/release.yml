@@ -25,7 +25,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake \
             qt6-base-dev qt6-base-dev-tools libgl1-mesa-dev \
-            libsndfile1-dev zlib1g-dev libpipewire-0.3-dev pkg-config
+            libsndfile1-dev zlib1g-dev libacl1-dev \
+            libpipewire-0.3-dev libasound2-dev \
+            liblilv-dev lv2-dev pkg-config
 
       - name: Configure (Release)
         run: >

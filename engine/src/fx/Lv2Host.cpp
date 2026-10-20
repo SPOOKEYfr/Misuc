@@ -2,6 +2,12 @@
 
 #include <cstring>
 
+// The catalog index uses std::map even in the no-lilv build (Windows keeps
+// the schema round-trip without hosting plugins), so include it unconditionally
+// - MSVC does not pull <map> transitively.
+#include <map>
+#include <utility>
+
 #ifdef MISUC_LV2
 #include <lilv/lilv.h>
 

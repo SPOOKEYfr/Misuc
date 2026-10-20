@@ -33,10 +33,11 @@ FileReadResult readFile(const std::string& path) {
     r.error = "cannot open: " + path;
     // Distinguish "does not exist" (a recoverable condition) from other
     // failures so callers can treat a missing autosave as "nothing to do".
-    struct stat st;
 #ifdef _WIN32
+    struct _stat64 st;
     r.missing = ::_stat64(path.c_str(), &st) != 0;
 #else
+    struct stat st;
     r.missing = ::stat(path.c_str(), &st) != 0;
 #endif
     return r;

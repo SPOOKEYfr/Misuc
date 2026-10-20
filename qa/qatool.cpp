@@ -58,7 +58,22 @@
 #include "TransportBar.h"
 #include <misuc/engine/audio/AudioEngine.h>
 #include <misuc/engine/audio/MidiScore.h>
+#include <misuc/engine/audio/AudioBackend.h>
+// QA drives headless engine loops, not a real audio service: pick the
+// platform default backend so the tool builds on Windows as well as Linux.
+#if defined(_WIN32)
+#include <misuc/engine/audio/WASAPIBackend.h>
+#else
 #include <misuc/engine/audio/PipeWireBackend.h>
+#endif
+
+std::unique_ptr<misuc::engine::AudioBackend> defaultBackend() {
+#if defined(_WIN32)
+  return std::make_unique<misuc::engine::WASAPIBackend>();
+#else
+  return std::make_unique<misuc::engine::PipeWireBackend>();
+#endif
+}
 #include <misuc/engine/audio/WavFile.h>
 #include <misuc/engine/core/Json.h>
 #include <misuc/engine/core/ProjectFile.h>
@@ -186,7 +201,7 @@ static constexpr int kAutoBand = 16;
 static void engineChecks() {
   std::printf("CASE engine-midi\n");
   {
-    AudioEngine eng(std::make_unique<misuc::engine::PipeWireBackend>());
+    AudioEngine eng(defaultBackend());
     eng.setGroove(false);
     eng.setMetronome(false, 0.0f);
     eng.setTempo(120.0);
@@ -206,7 +221,7 @@ static void engineChecks() {
   std::printf("CASE engine-automation\n");
   {
     // Ramp 0.05 -> 1.0 over beat 0..1: early window clear, late ~ unity.
-    AudioEngine eng(std::make_unique<misuc::engine::PipeWireBackend>());
+    AudioEngine eng(defaultBackend());
     eng.setGroove(false);
     eng.setMetronome(false, 0.0f);
     eng.setTempo(120.0);
@@ -254,7 +269,7 @@ static void engineChecks() {
     lane->points = {{0.0, 0.1}, {4.0, 0.1}};
     lane->muted = true;
 
-    AudioEngine eng(std::make_unique<misuc::engine::PipeWireBackend>());
+    AudioEngine eng(defaultBackend());
     eng.setGroove(false);
     eng.setMetronome(false, 0.0f);
     eng.setTempo(120.0);
@@ -310,7 +325,7 @@ static void engineChecks() {
 // ===========================================================================
 static void mixerChecks() {
   std::printf("CASE mixer\n");
-  AudioEngine eng(std::make_unique<misuc::engine::PipeWireBackend>());
+  AudioEngine eng(defaultBackend());
   eng.setGroove(false);
   eng.setMetronome(false, 0.0f);
   eng.setTempo(120.0);
@@ -320,7 +335,7 @@ static void mixerChecks() {
   eng.setScore(std::move(notes));
   constexpr uint32_t kFpb = 24000;
   auto render = [&](bool boosted) {
-    AudioEngine e(std::make_unique<misuc::engine::PipeWireBackend>());
+    AudioEngine e(defaultBackend());
     e.setGroove(false);
     e.setMetronome(false, 0.0f);
     e.setTempo(120.0);
@@ -357,7 +372,7 @@ static void busChecks() {
   std::printf("CASE bus-engine\n");
   constexpr uint32_t kFpb = 24000;
   auto render = [&](float busDb, bool soloBus, bool muteBus) {
-    AudioEngine e(std::make_unique<misuc::engine::PipeWireBackend>());
+    AudioEngine e(defaultBackend());
     e.setGroove(false);
     e.setMetronome(false, 0.0f);
     e.setTempo(120.0);
@@ -701,7 +716,7 @@ static void routingUiChecks(MainWindow* win, AudioEngine* engine) {
   // Render the exact published state on a fresh engine (the window's engine
   // instance only outputs through its own live stream, so a manual process()
   // there can never be trusted to produce audio).
-  AudioEngine r(std::make_unique<misuc::engine::PipeWireBackend>());
+  AudioEngine r(defaultBackend());
   r.setGroove(false);
   r.setMetronome(false, 0.0f);
   std::vector<float> buf(48000 * 2, 0.f);
@@ -3799,6 +3814,8 @@ static void pianoVelocityChecks(MainWindow* win) {
 // required by section 11 of the protocol.
 // ===========================================================================
 namespace {
+
+
 // Containers whose direct children are allowed to overlap or sit outside the
 // parent (scroll views, tab stacks, splitter handles, sliders, spinboxes…).
 bool isLayeredContainer(const QWidget* w) {
@@ -5197,7 +5214,7 @@ int main(int argc, char** argv) {
   // large stack objects (several MB of scratch/meter state between them), so
   // keep them on the heap to stay well clear of the default 8 MB stack limit.
   auto engine =
-      std::make_unique<AudioEngine>(std::make_unique<misuc::engine::PipeWireBackend>());
+      std::make_unique<AudioEngine>(defaultBackend());
   auto win = std::make_unique<MainWindow>(*engine);
   win->resize(1400, 900);
 

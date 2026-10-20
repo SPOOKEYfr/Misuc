@@ -5,6 +5,9 @@
 #include <exception>
 
 void runAll() {
+  // Unbuffered stdout: when a Windows fast-fall aborts the process mid-suite,
+  // the buffered "CASE ..." lines around the crash would be lost otherwise.
+  std::setvbuf(stdout, nullptr, _IONBF, 0);
   for (const auto& [name, fn] : misuc::test::registry()) {
     const int before = misuc::test::checkCount();
     std::printf("CASE %s\n", name);
@@ -13,6 +16,9 @@ void runAll() {
     } catch (const std::exception& e) {
       misuc::test::report(false, "unexpected exception", __FILE__, __LINE__);
       std::fprintf(stderr, "  EXCEPTION: %s\n", e.what());
+    } catch (...) {
+      misuc::test::report(false, "unexpected non-std exception", __FILE__, __LINE__);
+      std::fprintf(stderr, "  EXCEPTION: unknown\n");
     }
     (void)before;
   }

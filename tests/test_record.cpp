@@ -62,7 +62,7 @@ void setupEngine(AudioEngine& engine) {
 
 std::unique_ptr<AudioEngine> makeEngine() {
   auto e = std::make_unique<AudioEngine>(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   setupEngine(*e);
   return e;
 }
@@ -359,8 +359,10 @@ TEST_CASE(offline_render_excludes_metronome_clicks) {
 
   // Render two beats to disk at the native rate. With the metronome enabled
   // through playback, the export must still contain only the loop note.
-  const std::string dir = std::string("/tmp/misuc_offline_render");
-  ::mkdir(dir.c_str(), 0700);
+  const std::string dir = misuc::test::makeTempDir("misuc_offline_render");
+  TEST_ASSERT(!dir.empty());
+  if (dir.empty())
+    return;
   const std::string path = dir + "/clicks.wav";
   std::string err;
   TEST_ASSERT(engine.renderToWav(path, 0.0, 2.0, 2, err));

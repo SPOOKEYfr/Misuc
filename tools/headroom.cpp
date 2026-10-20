@@ -21,13 +21,30 @@
 // point multi-track summing crosses 0 dBFS.
 
 #include <misuc/engine/audio/AudioEngine.h>
+// Device backend is platform-dependent: the tool measures engine math, not a
+// specific audio service.
+#if defined(_WIN32)
+#include <misuc/engine/audio/WASAPIBackend.h>
+#else
 #include <misuc/engine/audio/PipeWireBackend.h>
+#endif
 #include <misuc/engine/audio/ClipScore.h>
 #include <misuc/engine/audio/MidiScore.h>
 #include <misuc/engine/audio/WavFile.h>
 #include <misuc/engine/dsp/Dsp.h>
 #include <misuc/engine/dsp/Midi.h>
 #include <misuc/engine/project/Session.h>
+
+namespace {
+std::unique_ptr<misuc::engine::AudioBackend> defaultBackend() {
+#if defined(_WIN32)
+  return std::make_unique<misuc::engine::WASAPIBackend>();
+#else
+  return std::make_unique<misuc::engine::PipeWireBackend>();
+#endif
+}
+}  // namespace
+
 
 #include <algorithm>
 #include <cmath>
@@ -139,7 +156,7 @@ int runProject(const std::string& file) {
   auto s = misuc::project::Session::fromJson(ss.str());
 
   auto engine = std::make_unique<misuc::engine::AudioEngine>(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      defaultBackend());
   engine->setTempo(s.tempo());
   engine->setMetronome(false, 0.0f);
   engine->setGroove(false);
@@ -199,7 +216,7 @@ int runStress(int nTracks, double masterDb) {
                 return x.startBeats < y.startBeats;
               });
     auto engine = std::make_unique<misuc::engine::AudioEngine>(
-        std::make_unique<misuc::engine::PipeWireBackend>());
+        defaultBackend());
     engine->setTempo(120.0);
     engine->setMetronome(false, 0.0f);
     engine->setGroove(false);
@@ -264,7 +281,7 @@ int runWorstCase() {
   }
 
   auto engine = std::make_unique<misuc::engine::AudioEngine>(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      defaultBackend());
   engine->setTempo(120.0);
   engine->setMetronome(false, 0.0f);
   engine->setGroove(false);

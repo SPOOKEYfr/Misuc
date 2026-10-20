@@ -49,7 +49,7 @@ Rendered renderMix(
     uint32_t frames) {
   Rendered out;
   out.engine = std::make_unique<misuc::engine::AudioEngine>(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   out.engine->setGroove(false);
   out.engine->setMetronome(false, 0.0f);
   out.engine->setTempo(120.0);
@@ -80,7 +80,7 @@ Rendered renderAuto(
     uint32_t frames) {
   Rendered out;
   out.engine = std::make_unique<misuc::engine::AudioEngine>(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   out.engine->setGroove(false);
   out.engine->setMetronome(false, 0.0f);
   out.engine->setTempo(120.0);
@@ -111,7 +111,7 @@ Rendered renderBusMix(
     uint32_t frames) {
   Rendered out;
   out.engine = std::make_unique<misuc::engine::AudioEngine>(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   out.engine->setGroove(false);
   out.engine->setMetronome(false, 0.0f);
   out.engine->setTempo(120.0);
@@ -330,7 +330,7 @@ TEST_CASE(mixer_export_honors_mixer_state) {
   misuc::engine::buildMidiScore(s, notes);
 
   misuc::engine::AudioEngine engine(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   engine.setGroove(false);
   engine.setMetronome(false, 0.0f);
   engine.setTempo(120.0);
@@ -441,7 +441,7 @@ TEST_CASE(automation_export_honors_curve) {
   misuc::engine::buildMidiScore(s, notes);
 
   misuc::engine::AudioEngine engine(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   engine.setGroove(false);
   engine.setMetronome(false, 0.0f);
   engine.setTempo(120.0);
@@ -699,7 +699,7 @@ TEST_CASE(mixer_scale_125_inserts_render) {
 
   // Publish the reloaded session exactly as the headroom tool does.
   misuc::engine::AudioEngine engine(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   engine.setTempo(120.0);
   engine.setGroove(false);
   engine.setMetronome(false, 0.0f);

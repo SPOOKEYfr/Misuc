@@ -1,7 +1,5 @@
 #include "test_utils.h"
 
-#include <unistd.h>
-
 #include <algorithm>
 #include <atomic>
 #include <cmath>
@@ -35,7 +33,8 @@ namespace {
 std::atomic<int> g_tempCounter{0};
 
 std::string tempPath(const char* suffix) {
-  static std::string pid = std::to_string(static_cast<long long>(getpid()));
+  static const std::string pid =
+      std::to_string(misuc::test::processId());
   const int n = g_tempCounter.fetch_add(1);
   return "/tmp/misuc_clip_test_" + pid + "_" + std::to_string(n) + suffix;
 }
@@ -331,7 +330,7 @@ TEST_CASE(clip_player_fades_endpoints) {
 // --- Engine: record, clip playback, offline render (headless) -------------
 
 TEST_CASE(record_capture_headless) {
-  AudioEngine engine(std::make_unique<misuc::engine::PipeWireBackend>());
+  AudioEngine engine(misuc::test::defaultAudioBackend());
   engine.setGroove(false);
   constexpr uint32_t kChunk = 4800;
   std::vector<float> out(kChunk * 2, 0.f);
@@ -387,7 +386,7 @@ TEST_CASE(clip_playback_through_engine_headless) {
   buildClipScore(s, clips, storage, err);
   TEST_ASSERT(clips.size() == 1);
 
-  AudioEngine engine(std::make_unique<misuc::engine::PipeWireBackend>());
+  AudioEngine engine(misuc::test::defaultAudioBackend());
   engine.setGroove(false);
   engine.setClips(std::move(clips), std::move(storage));
   engine.play(false);
@@ -431,7 +430,7 @@ TEST_CASE(render_to_wav_offline) {
   buildClipScore(s, clips, storage, err);
   TEST_ASSERT(clips.size() == 1);
 
-  AudioEngine engine(std::make_unique<misuc::engine::PipeWireBackend>());
+  AudioEngine engine(misuc::test::defaultAudioBackend());
   engine.setGroove(false);
   engine.setMetronome(false, 0.0f);
   engine.setScore(std::move(notes));
@@ -469,7 +468,7 @@ TEST_CASE(render_to_wav_offline) {
 // attack. Headless: we drive process() directly, exactly like clipboard
 // playback, so no sound daemon is required.
 TEST_CASE(preview_sample_headless) {
-  AudioEngine engine(std::make_unique<misuc::engine::PipeWireBackend>());
+  AudioEngine engine(misuc::test::defaultAudioBackend());
   engine.setGroove(false);
   engine.setMetronome(false, 0.0f);
   engine.setTempo(120.0);
@@ -503,7 +502,7 @@ TEST_CASE(preview_sample_headless) {
 // Ruler seek: the playhead jumps to the clicked beat while stopped, and Play
 // resumes from the caret rather than rewinding to bar 1. Headless via process().
 TEST_CASE(seek_transport_headless) {
-  AudioEngine engine(std::make_unique<misuc::engine::PipeWireBackend>());
+  AudioEngine engine(misuc::test::defaultAudioBackend());
   engine.setGroove(false);
   engine.setMetronome(false, 0.0f);
   engine.setTempo(120.0); // 24000 frames per beat @48k

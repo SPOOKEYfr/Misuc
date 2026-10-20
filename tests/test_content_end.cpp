@@ -26,7 +26,7 @@ constexpr uint32_t kChunk = 512u;
 
 std::unique_ptr<AudioEngine> makeEngine() {
   auto e = std::make_unique<AudioEngine>(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   e->setGroove(false);
   e->setMetronome(false, 0.0f);
   e->setTempo(120.0);

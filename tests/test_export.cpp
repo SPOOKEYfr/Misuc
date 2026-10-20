@@ -8,7 +8,6 @@
 
 #include "test_utils.h"
 
-#include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
@@ -46,7 +45,7 @@ std::atomic<int> gCounter{0};
 
 std::string tmp(const char* suffix) {
   static const std::string pid =
-      std::to_string(static_cast<long long>(getpid()));
+         std::to_string(misuc::test::processId());
   return "/tmp/misuc_export_" + pid + "_" +
          std::to_string(static_cast<long long>(gCounter.fetch_add(1))) +
          suffix;
@@ -264,7 +263,7 @@ TEST_CASE(export_renderToFile_flac_roundtrip) {
   s.findTrack(tid)->notes.push_back(NoteEvent{0, 60, 100, 0.0, 1.0});
   const auto src = sine2(96000, 0.5f); // 2 s of stereo tone
   const std::string wavPath = writeToneWav(src, 96000);
-  AudioEngine engine(std::make_unique<misuc::engine::PipeWireBackend>());
+  AudioEngine engine(misuc::test::defaultAudioBackend());
   setupRenderEngine(engine, s, wavPath);
 
   const std::string flacPath = tmp(".flac");
@@ -314,7 +313,7 @@ TEST_CASE(export_render_range_subset) {
   s.findTrack(tid)->notes.push_back(NoteEvent{0, 60, 100, 0.0, 1.0});
   const auto src0 = sine2(192000, 0.5f); // full 4-beat source; clip uses 1..3
   const std::string wavPath = writeToneWav(src0, 192000);
-  AudioEngine engine(std::make_unique<misuc::engine::PipeWireBackend>());
+  AudioEngine engine(misuc::test::defaultAudioBackend());
   setupRenderEngine(engine, s, wavPath);
 
   std::string err;
@@ -391,7 +390,7 @@ TEST_CASE(export_headroom_policy_no_silent_clipping) {
     Session loudS;
     loudS.addTrack("Loud");
     const std::string loudWav = writeToneWav(sine2(96000, 2.0f), 96000);
-    AudioEngine loudEng(std::make_unique<misuc::engine::PipeWireBackend>());
+    AudioEngine loudEng(misuc::test::defaultAudioBackend());
     setupRenderEngine(loudEng, loudS, loudWav);
     std::string err;
     AudioBuffer fl, w16, wf;
@@ -412,7 +411,7 @@ TEST_CASE(export_headroom_policy_no_silent_clipping) {
     Session midS;
     midS.addTrack("Mid");
     const std::string midWav = writeToneWav(sine2(96000, 1.0f), 96000);
-    AudioEngine midEng(std::make_unique<misuc::engine::PipeWireBackend>());
+    AudioEngine midEng(misuc::test::defaultAudioBackend());
     setupRenderEngine(midEng, midS, midWav);
     std::string err;
     AudioBuffer fl, w16, wf;
@@ -433,7 +432,7 @@ TEST_CASE(export_headroom_policy_no_silent_clipping) {
     Session quietS;
     quietS.addTrack("Quiet");
     const std::string quietWav = writeToneWav(sine2(96000, 0.1f), 96000);
-    AudioEngine quietEng(std::make_unique<misuc::engine::PipeWireBackend>());
+    AudioEngine quietEng(misuc::test::defaultAudioBackend());
     setupRenderEngine(quietEng, quietS, quietWav);
     std::string err;
     AudioBuffer fl, w16, wf;
@@ -541,7 +540,7 @@ TEST_CASE(export_sample_rate_44100_resample) {
 
   Session s;
   s.addTrack("P");
-  AudioEngine eng(std::make_unique<misuc::engine::PipeWireBackend>());
+  AudioEngine eng(misuc::test::defaultAudioBackend());
   setupRenderEngine(eng, s, wavPath);
   std::remove(wavPath.c_str());
 
@@ -641,7 +640,7 @@ TEST_CASE(export_codex_probe_matches_writer) {
   s.findTrack(tid)->notes.push_back(NoteEvent{0, 60, 100, 0.0, 1.0});
   const auto src = sine2(48000, 0.5f); // 1 s
   const std::string wavPath = writeToneWav(src, 48000);
-  AudioEngine engine(std::make_unique<misuc::engine::PipeWireBackend>());
+  AudioEngine engine(misuc::test::defaultAudioBackend());
   setupRenderEngine(engine, s, wavPath);
 
   // 4 beats at 120 BPM = 2 s = 96000 frames at 48 kHz.
@@ -679,7 +678,7 @@ TEST_CASE(export_render_progress_reports_and_cancels) {
   s.findTrack(tid)->notes.push_back(NoteEvent{0, 60, 100, 0.0, 1.0});
   const auto src = sine2(96000, 0.5f);
   const std::string wavPath = writeToneWav(src, 96000);
-  AudioEngine engine(std::make_unique<misuc::engine::PipeWireBackend>());
+  AudioEngine engine(misuc::test::defaultAudioBackend());
   setupRenderEngine(engine, s, wavPath);
 
   // Progress is monotonic 0..1 over a successful render.
@@ -728,7 +727,7 @@ TEST_CASE(export_render_includes_metronome_when_asked) {
   // A silent session: no notes, no clips. Playback must render nothing, so
   // the ONLY audible content in a bounce is the metronome click when asked.
   Session s;
-  AudioEngine engine(std::make_unique<misuc::engine::PipeWireBackend>());
+  AudioEngine engine(misuc::test::defaultAudioBackend());
   engine.setGroove(false);
   engine.setMetronome(true, 0.0f);
   engine.setScore(std::vector<misuc::dsp::MidiNote>{});

@@ -49,7 +49,7 @@ Rendered renderRouting(
     uint32_t frames) {
   Rendered out;
   out.engine = std::make_unique<misuc::engine::AudioEngine>(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   out.engine->setGroove(false);
   out.engine->setMetronome(false, 0.0f);
   out.engine->setTempo(120.0);

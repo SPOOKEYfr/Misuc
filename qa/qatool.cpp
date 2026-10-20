@@ -36,6 +36,10 @@
 #include <cstdio>
 #include <cmath>
 #include <cstdlib>
+#if defined(_WIN32)
+#include <direct.h>
+#include <process.h>
+#endif
 #include <memory>
 #include <string>
 #include <vector>
@@ -4587,11 +4591,31 @@ static bool writeRepresentativeFlp(const std::string& flpPath) {
 static void flpImportChecks(MainWindow* win, AudioEngine* engine) {
   std::printf("CASE flp-import-play\n");
 
+#if defined(_WIN32)
+  std::string dir;
+  {
+    // Visa-free temp root: CRT _mkdir loop mirrors the POSIX mkdtemp flow
+    // without pulling in a POSIX-only symbol.
+    const char* tmpRoot = std::getenv("TEMP");
+    unsigned int seed = 1717u + static_cast<unsigned int>(::_getpid());
+    for (int attempt = 0; attempt < 64 && dir.empty(); ++attempt) {
+      seed = seed * 1664525u + 1013904223u;
+      const std::string cand =
+          std::string(tmpRoot && *tmpRoot ? tmpRoot : ".") +
+          "\\misuc_qa_flp_" + std::to_string((seed >> 16) % 999983u);
+      if (::_mkdir(cand.c_str()) == 0)
+        dir = cand;
+    }
+  }
+  CHECK(!dir.empty());
+  if (dir.empty()) return;
+#else
   char dirTmpl[] = "/tmp/misuc_qa_flp_XXXXXX";
   char* d = mkdtemp(dirTmpl);
   CHECK(d != nullptr);
   if (!d) return;
   const std::string dir(d);
+#endif
   const std::string flpPath = dir + "/rep.flp";
 
   // A real, short sample file for the sampler channel (0.01 s of 440 Hz).

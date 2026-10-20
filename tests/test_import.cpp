@@ -574,12 +574,10 @@ TEST_CASE(importSamplerMaterialization)
 //  - a FL generator (InternalName set) -> Instrument placeholder row, counted
 //    as an unsupported plugin with its name preserved.
 {
-    char dirTmpl[] = "/tmp/misuc_flpimp_XXXXXX";
-    char* d = mkdtemp(dirTmpl);
-    TEST_ASSERT(d != nullptr);
-    if (!d)
+    const std::string base = misuc::test::makeTempDir("misuc_flpimp");
+    TEST_ASSERT(!base.empty());
+    if (base.empty())
         return;
-    const std::string base(d);
     writeToneWav(base + "/kick.wav");
 
     FlpResult r;

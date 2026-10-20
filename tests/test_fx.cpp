@@ -51,7 +51,7 @@ class FxRig {
  public:
   FxRig() {
     engine_ = std::make_unique<misuc::engine::AudioEngine>(
-        std::make_unique<misuc::engine::PipeWireBackend>());
+        misuc::test::defaultAudioBackend());
     engine_->setGroove(false);
     engine_->setMetronome(false, 0.0f);
     engine_->setTempo(120.0);
@@ -134,7 +134,7 @@ constexpr size_t kTailTo = 4 * kFpb120 - 2400;
 
 TEST_CASE(fx_host_discovery_lists_effects) {
   misuc::engine::AudioEngine engine(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   // The built-in EQ is present on every build; LV2 effects additionally appear
   // when the build hosts lilv.
   std::vector<misuc::engine::FxPluginInfo> fx = engine.discoverFx();
@@ -170,7 +170,7 @@ TEST_CASE(fx_host_discovery_lists_effects) {
 TEST_CASE(fx_delay_insert_changes_render) {
   FxRig rig;
   misuc::engine::AudioEngine probe(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   const std::string uri = hostDelayUri(probe);
   if (uri.empty())
     return; // hosting unavailable: the pass-through is the only render path
@@ -333,7 +333,7 @@ TEST_CASE(fx_automation_midsegment_step_is_audible_in_export) {
   // Unautomated export (control).
   std::string err;
   misuc::engine::AudioEngine brightEngine(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   setup(brightEngine);
   std::vector<misuc::dsp::MidiNote> notes;
   misuc::engine::buildMidiScore(s, notes);
@@ -344,7 +344,7 @@ TEST_CASE(fx_automation_midsegment_step_is_audible_in_export) {
 
   // Automating the same insert offline.
   misuc::engine::AudioEngine stepEngine(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   setup(stepEngine);
   stepEngine.setScore(notes);
   stepEngine.publishFx(chain);
@@ -400,7 +400,7 @@ TEST_CASE(fx_automation_export_matches_live_cadence) {
   const uint32_t frames = 4 * kFpb120;
 
   misuc::engine::AudioEngine live(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   live.setGroove(false);
   live.setMetronome(false, 0.0f);
   live.setTempo(120.0);
@@ -413,7 +413,7 @@ TEST_CASE(fx_automation_export_matches_live_cadence) {
 
   std::string err;
   misuc::engine::AudioEngine render(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   render.setGroove(false);
   render.setMetronome(false, 0.0f);
   render.setTempo(120.0);
@@ -508,7 +508,7 @@ TEST_CASE(fx_automation_unknown_target_is_ignored) {
 
 TEST_CASE(fx_repeat_publish_and_clear_caps_chains) {
   misuc::engine::AudioEngine engine(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   std::vector<std::vector<misuc::engine::FxInsertParam>> chains(
       misuc::engine::AudioEngine::kMaxTrackCount + 4);
   chains[0].push_back({"urn:not:a:real:plugin", true,
@@ -567,7 +567,7 @@ TEST_CASE(fx_session_insert_roundtrip) {
 // with the DSP's hard ranges so the UI can build sliders directly.
 TEST_CASE(fx_builtin_eq_metadata) {
   misuc::engine::AudioEngine engine(
-      std::make_unique<misuc::engine::PipeWireBackend>());
+      misuc::test::defaultAudioBackend());
   const misuc::engine::FxPluginInfo* info =
       engine.fxInfo(misuc::engine::kBuiltinEqUri);
   TEST_ASSERT(info != nullptr);

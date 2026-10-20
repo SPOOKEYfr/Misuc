@@ -18,7 +18,7 @@ like the Linux build was — see honest bounds in
   component is what CI uses).
 - CMake 3.21+, Ninja or the Visual Studio generator.
 - [vcpkg](https://github.com/microsoft/vcpkg) — the repo ships a manifest
-  (`vcpkg.json`) that pulls `zlib` and `sndfile` automatically; no manual
+  (`vcpkg.json`) that pulls `zlib` and `libsndfile` automatically; no manual
   installs needed.
 
 ## Configure & build (Visual Studio generator)

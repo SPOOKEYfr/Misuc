@@ -49,9 +49,14 @@ set(MISUC_UI_SOURCES
   src/export/ExportDialog.cpp
   src/workspace/WorkspaceManager.cpp)
 
+# Header-only QObject subclass: listed explicitly so AUTOMOC runs moc on it
+# (findChild + vtable require the generated metaobject; MSVC static-asserts
+# the Q_OBJECT contract at compile time, so the guard cannot be skipped).
+set(MISUC_UI_MOC_HEADERS src/elide/ElideLabel.h)
+
 # The UI sources compiled once, shared by the real app and the QA harness so
 # GUI checks exercise the very same translation units shipped to users.
-add_library(misuc_ui_objs OBJECT ${MISUC_UI_SOURCES})
+add_library(misuc_ui_objs OBJECT ${MISUC_UI_SOURCES} ${MISUC_UI_MOC_HEADERS})
 target_include_directories(misuc_ui_objs PRIVATE src)
 target_include_directories(misuc_ui_objs PUBLIC
   ${CMAKE_CURRENT_BINARY_DIR}

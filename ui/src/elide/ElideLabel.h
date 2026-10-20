@@ -14,7 +14,11 @@ namespace misuc::ui {
 // small fixed value (not the font-metrics width), this label can shrink and
 // its surrounding layout can compress instead of forcing a too-wide dock.
 class ElideLabel : public QLabel {
-  // Plain QObject subclass (no signals/slots): header-only, no moc required.
+  Q_OBJECT
+// Plain QObject subclass that only overrides paintEvent/resizeEvent; the
+// Q_OBJECT macro is required for findChild<T*> static_cast-based lookup to be
+// well-formed on all compilers (MSVC static-asserts it). moc covers this
+// target already (MISUC_AUTOMOC processes every ui source).
 public:
   explicit ElideLabel(QWidget* parent = nullptr) : QLabel(parent) {
     setTextInteractionFlags(Qt::TextSelectableByMouse);

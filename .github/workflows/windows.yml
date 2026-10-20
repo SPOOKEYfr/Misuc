@@ -31,7 +31,8 @@ jobs:
         shell: pwsh
         run: >
           & "$env:GITHUB_WORKSPACE\vcpkg\vcpkg.exe"
-          --triplet x64-windows install
+          --triplet x64-windows
+          --x-install-root="$env:GITHUB_WORKSPACE\vcpkg\installed" install
 
       - name: Configure (vcpkg deps - zlib, sndfile)
         shell: pwsh
@@ -39,6 +40,7 @@ jobs:
           cmake -S . -B build -G "Visual Studio 17 2022" -A x64
           -DCMAKE_TOOLCHAIN_FILE="$env:GITHUB_WORKSPACE\vcpkg\scripts\buildsystems\vcpkg.cmake"
           -DVCPKG_TARGET_TRIPLET=x64-windows
+          -DVCPKG_INSTALLED_DIR="$env:GITHUB_WORKSPACE\vcpkg\installed"
           -DVCPKG_MANIFEST_INSTALL=OFF
 
       - name: Build

@@ -1,0 +1,151 @@
+name: release
+
+# Tag-driven dual-platform release:
+#   v* tag push -> Linux .deb (CPack DEB) + Windows .exe installer
+#   (CPack NSIS) build, test, package, and publish a GitHub Release with the
+#   assets attached.
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install Linux build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake \
+            qt6-base-dev qt6-base-dev-tools libgl1-mesa-dev \
+            libsndfile1-dev zlib1g-dev libpipewire-0.3-dev pkg-config
+
+      - name: Configure (Release)
+        run: >
+          cmake -S . -B build
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_PREFIX=/usr
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Package .deb (CPack DEB)
+        run: |
+          cd build
+          cpack -C Release -G DEB
+
+      - name: Upload .deb artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          path: build/misuc_*.deb
+          if-no-files-found: error
+
+  windows:
+    runs-on: windows-2022
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Install Qt (MSVC 2022 x64)
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.0'
+          arch: 'win64_msvc2022_64'
+          cache: true
+
+      - name: Bootstrap vcpkg (image no longer exports VCPKG_ROOT)
+        shell: pwsh
+        run: |
+          $vcpkgDir = Join-Path $env:GITHUB_WORKSPACE 'vcpkg'
+          if (-not (Test-Path (Join-Path $vcpkgDir 'vcpkg.exe'))) {
+            git clone --depth 1 https://github.com/microsoft/vcpkg.git "$vcpkgDir"
+            & (Join-Path $vcpkgDir 'bootstrap-vcpkg.bat') -disableMetrics
+          }
+
+      - name: Install vcpkg manifest deps (zlib, sndfile)
+        shell: pwsh
+        run: >
+          & "$env:GITHUB_WORKSPACE\vcpkg\vcpkg.exe"
+          --triplet x64-windows
+          --x-install-root="$env:GITHUB_WORKSPACE\vcpkg\installed" install
+
+      - name: Install NSIS (CPack .exe generator)
+        shell: pwsh
+        run: choco install -y nsis
+
+      - name: Configure (vcpkg deps - zlib, sndfile)
+        shell: pwsh
+        run: >
+          cmake -S . -B build -G "Visual Studio 17 2022" -A x64
+          -DCMAKE_TOOLCHAIN_FILE="$env:GITHUB_WORKSPACE\vcpkg\scripts\buildsystems\vcpkg.cmake"
+          -DVCPKG_TARGET_TRIPLET=x64-windows
+          -DVCPKG_INSTALLED_DIR="$env:GITHUB_WORKSPACE\vcpkg\installed"
+          -DVCPKG_MANIFEST_INSTALL=OFF
+
+      - name: Build
+        shell: pwsh
+        run: cmake --build build --config Release
+
+      - name: Test
+        shell: pwsh
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Package .exe installer (CPack NSIS)
+        shell: pwsh
+        run: |
+          cd build
+          cpack -C Release -G NSIS
+
+      - name: Upload .exe artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          path: build/misuc-*win64.exe
+          if-no-files-found: error
+
+  publish:
+    needs: [linux, windows]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download release assets
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: release-assets
+
+      - name: Publish GitHub release (.deb + .exe)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -l release-assets
+          cat > notes.md <<'EOF'
+          Misuc ${{ github.ref_name }}
+
+          Platform installers and packages:
+
+          - `misuc_0.3.0-1_amd64.deb` — **Linux installer (.deb)** for
+            Debian/Ubuntu: `sudo apt install ./misuc_0.3.0-1_amd64.deb`
+          - `misuc-0.3.0-1-win64.exe` — **Windows installer (.exe)** double
+            click to run the setup wizard (installs into
+            `C:\Program Files\Misuc`)
+
+          Notes: this is the first release that installs on Windows. Audio
+          behaviour on real hardware is not yet validated; the engine, UI and
+          packaged test suites run green in CI for both platforms.
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Misuc ${{ github.ref_name }} - Linux .deb + Windows .exe" \
+            --notes-file notes.md \
+            $(find release-assets -type f \( -name "*.deb" -o -name "*.exe" \) -printf "%p ")

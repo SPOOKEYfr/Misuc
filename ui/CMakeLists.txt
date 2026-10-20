@@ -129,6 +129,27 @@ if(NOT WIN32)
   endforeach()
 endif()
 
+# Windows side of the staged install (feeds the NSIS .exe installer + ZIP):
+# the exe lands in the install root and windeployqt stages the Qt runtime
+# NEXT to it inside the package tree at cpack time, so the installed app has
+# no external Qt dependency. windeployqt must be on PATH when cpack runs
+# (install-qt-action provides it on CI).
+if(WIN32)
+  install(TARGETS misuc_app RUNTIME DESTINATION .)
+  install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE DESTINATION .)
+  install(CODE [[
+    execute_process(COMMAND windeployqt --release --compiler-runtime
+                            "${CMAKE_INSTALL_PREFIX}/misuc_app.exe"
+                    RESULT_VARIABLE _wdqRc
+                    OUTPUT_VARIABLE _wdqOut
+                    ERROR_VARIABLE _wdqErr
+                    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_STRIP_TRAILING_WHITESPACE)
+    if(NOT _wdqRc EQUAL 0)
+      message(WARNING "windeployqt failed (rc ${_wdqRc}): ${_wdqErr}")
+    endif()
+  ]])
+endif()
+
 # ---------------------------------------------------------------------------
 # Release packaging with CPack (`cmake --build build --target package`):
 # a Debian package (with automatic shared-library dependencies) and a plain
@@ -141,8 +162,14 @@ set(CPACK_PACKAGE_VENDOR "Misuc")
 set(CPACK_PACKAGE_CONTACT "misuc@localhost")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Multi-track MIDI sequencer and audio workstation")
 if(WIN32)
-  set(CPACK_PACKAGE_FILE_NAME "misuc-${CPACK_PACKAGE_VERSION}-${CPACK_PACKAGE_RELEASE}-windows")
-  set(CPACK_GENERATOR "ZIP")
+  set(CPACK_PACKAGE_FILE_NAME "misuc-${CPACK_PACKAGE_VERSION}-${CPACK_PACKAGE_RELEASE}-win64")
+  # NSIS drives the double-click installer (.exe); the ZIP stays for portable
+  # usage (u盘/stick installs where no registry writes are wanted).
+  set(CPACK_GENERATOR "NSIS;ZIP")
+  set(CPACK_NSIS_DISPLAY_NAME "Misuc ${CPACK_PACKAGE_VERSION}")
+  set(CPACK_NSIS_PACKAGE_NAME "Misuc")
+  set(CPACK_NSIS_INSTALL_ROOT "$PROGRAMFILES64")
+  set(CPACK_NSIS_MUI_FINISHPAGE_RUN "misuc_app.exe")
 else()
   set(CPACK_PACKAGE_FILE_NAME "misuc-${CPACK_PACKAGE_VERSION}-${CPACK_PACKAGE_RELEASE}-linux")
   set(CPACK_GENERATOR "DEB;TGZ")

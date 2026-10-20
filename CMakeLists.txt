@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(misuc
-  VERSION 0.2.0
+  VERSION 0.3.0
   DESCRIPTION "Misuc - Multi-track MIDI sequencer and audio workstation"
   LANGUAGES C CXX)
 

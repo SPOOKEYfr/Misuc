@@ -527,7 +527,7 @@ void WASAPIBackend::renderLoop() noexcept {
   if (FAILED(hr))
     return fail("The output device rejected the stream format.");
 
-  DWORD bufferFrames = 0;
+  UINT32 bufferFrames = 0;
   hr = client.get()->GetBufferSize(&bufferFrames);
   if (FAILED(hr))
     return fail("Could not size the output buffer.");
@@ -573,11 +573,11 @@ void WASAPIBackend::renderLoop() noexcept {
       continue;
     if (padding > bufferFrames)
       padding = bufferFrames;
-    const DWORD framesAvail = bufferFrames - padding;
+    const UINT32 framesAvail = bufferFrames - padding;
     if (framesAvail == 0)
       continue;
-    const DWORD frames = framesAvail > kMaxScratchFrames
-                             ? static_cast<DWORD>(kMaxScratchFrames)
+    const UINT32 frames = framesAvail > kMaxScratchFrames
+                             ? static_cast<UINT32>(kMaxScratchFrames)
                              : framesAvail;
 
     // Xrun detection like the PipeWire backend: the wall-clock gap since the
@@ -765,6 +765,8 @@ void WASAPIBackend::captureLoop() noexcept {
   if (mmcss)
     ::AvRevertMmThreadCharacteristics(mmcss);
 }
+
+} // namespace misuc::engine
 
 #else // !_WIN32
 

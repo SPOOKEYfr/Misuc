@@ -76,7 +76,7 @@ if(WIN32)
   # into the exe by rc.exe. The icon path is absolute because the generated
   # .rc lives in the binary tree while the .ico stays with the assets.
   set(MISUC_RC_ICON_PATH "${CMAKE_CURRENT_SOURCE_DIR}/../assets/nsis/misuc.ico")
-  string(REPLACE "/" "\\" MISUC_RC_ICON_PATH "${MISUC_RC_ICON_PATH}")
+  string(REPLACE "\\" "/" MISUC_RC_ICON_PATH "${MISUC_RC_ICON_PATH}")
   string(REPLACE "." ";" _misuc_ver_list "${PROJECT_VERSION}")
   list(GET _misuc_ver_list 0 _misuc_ver_major)
   list(GET _misuc_ver_list 1 _misuc_ver_minor)

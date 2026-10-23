@@ -2,12 +2,17 @@
 // comes from this resource (the Qt window icon alone does not cover the shell
 // surface). Version fields are stamped from CMake at configure time so the
 // installer/updater surfaces agree with the project() version.
+//
+// NOTE: rc.exe processes C-style escapes in quoted strings (\a = BEL!), so
+// the icon path must use FORWARD slashes - a literal backslash path like
+// D:\a\Misuc would corrupt the first two path components. VISUAL STUDIO
+// accepts forward-slash paths in icon resources.
 1 ICON "@MISUC_RC_ICON_PATH@"
 
 1 VERSIONINFO
 FILEVERSION     @MISUC_RC_FILEVER_Q@
 PRODUCTVERSION  @MISUC_RC_FILEVER_Q@
-FILEOS          VOS_NT_WINDOWS32
+FILEOS          0x00040004L // VOS_NT_WINDOWS32
 FILETYPE        VFT_APP
 BEGIN
   BLOCK "StringFileInfo"

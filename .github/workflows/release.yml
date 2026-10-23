@@ -53,10 +53,12 @@ jobs:
           test -x /usr/bin/misuc_app || (echo "/usr/bin/misuc_app missing" && exit 1)
           test -f /usr/share/applications/misuc.desktop || (echo "desktop entry missing" && exit 1)
           test -f /usr/share/metainfo/misuc.appdata.xml || (echo "appstream metadata missing" && exit 1)
-          QT_QPA_PLATFORM=offscreen timeout 6 misuc_app; rc=$?
+          QT_QPA_PLATFORM=offscreen timeout 6 misuc_app || rc=$?
+          rc=${rc:-0}
           if [ "$rc" != "0" ] && [ "$rc" != "124" ]; then
             echo "misuc_app exited with rc $rc"; exit 1
           fi
+          echo "install + launch smoke OK (rc=$rc)"
 
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v4
@@ -120,6 +122,17 @@ jobs:
         run: |
           cd build
           cpack -C Release -G NSIS
+          if ($LASTEXITCODE -ne 0) {
+            if (Test-Path _CPack_Packages/win64/NSIS/NSISOutput.log) {
+              Write-Host "===== NSISOutput.log (last 60 lines) ====="
+              Get-Content _CPack_Packages/win64/NSIS/NSISOutput.log | Select-Object -Last 60
+            } else { Write-Host "NSISOutput.log missing" }
+            if (Test-Path _CPack_Packages/win64/NSIS/project.nsi) {
+              Write-Host "===== project.nsi (first 140 lines) ====="
+              Get-Content _CPack_Packages/win64/NSIS/project.nsi | Select-Object -First 140
+            }
+            exit $LASTEXITCODE
+          }
 
       - name: "Smoke - silent-install, verify payload, launch, uninstall"
         shell: pwsh

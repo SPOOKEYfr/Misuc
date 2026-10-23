@@ -196,6 +196,7 @@ set(CPACK_PACKAGE_CONTACT "SPOOKEYfr <oibhupii@gmail.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Multi-track MIDI sequencer and audio workstation")
 get_filename_component(CPACK_RESOURCE_FILE_LICENSE
   "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE" ABSOLUTE)
+file(TO_NATIVE_PATH "${CPACK_RESOURCE_FILE_LICENSE}" CPACK_RESOURCE_FILE_LICENSE)
 if(WIN32)
   set(CPACK_PACKAGE_FILE_NAME "misuc-${CPACK_PACKAGE_VERSION}-${CPACK_PACKAGE_RELEASE}-win64")
   # NSIS drives the double-click installer (.exe); the ZIP stays for portable
@@ -205,18 +206,22 @@ if(WIN32)
   # Shell-facing art lives in assets/nsis/ (bitmaps are exact-size PNG->BMP3
   # renders from assets/nsis/make_assets.sh).
   #
-  # makensis `File` cannot resolve embedded ".." path elements, so the asset
-  # dir must be a fully-resolved ABSOLUTE path with native separators (the
-  # "${dir}/../assets/nsis" form is exactly what made the first themed build
-  # fail with "File ... -> no files found" on the Actions runner).
+  # makensis `File` cannot resolve embedded ".." path elements and rejects
+  # forward slashes, so each art path is fully resolved then converted to a
+  # native (backslash) path in ONE go - a partially-native string like
+  # "D:\...\nsis/welcome.bmp" still fails with "-> no files found".
   get_filename_component(MISUC_NSIS_ASSETS_DIR
     "${CMAKE_CURRENT_SOURCE_DIR}/../assets/nsis" ABSOLUTE)
-  file(TO_NATIVE_PATH "${MISUC_NSIS_ASSETS_DIR}" MISUC_NSIS_ASSETS_DIR)
-  set(CPACK_NSIS_MUI_ICON "${MISUC_NSIS_ASSETS_DIR}/misuc.ico")
-  set(CPACK_NSIS_MUI_UNIICON "${MISUC_NSIS_ASSETS_DIR}/misuc.ico")
-  set(CPACK_NSIS_MUI_WELCOMEFINISHPAGE_BITMAP "${MISUC_NSIS_ASSETS_DIR}/welcome.bmp")
-  set(CPACK_NSIS_MUI_UNWELCOMEFINISHPAGE_BITMAP "${MISUC_NSIS_ASSETS_DIR}/welcome.bmp")
-  set(CPACK_NSIS_MUI_HEADERIMAGE "${MISUC_NSIS_ASSETS_DIR}/header.bmp")
+  file(TO_NATIVE_PATH "${MISUC_NSIS_ASSETS_DIR}/misuc.ico"
+    CPACK_NSIS_MUI_ICON)
+  file(TO_NATIVE_PATH "${MISUC_NSIS_ASSETS_DIR}/misuc.ico"
+    CPACK_NSIS_MUI_UNIICON)
+  file(TO_NATIVE_PATH "${MISUC_NSIS_ASSETS_DIR}/welcome.bmp"
+    CPACK_NSIS_MUI_WELCOMEFINISHPAGE_BITMAP)
+  file(TO_NATIVE_PATH "${MISUC_NSIS_ASSETS_DIR}/welcome.bmp"
+    CPACK_NSIS_MUI_UNWELCOMEFINISHPAGE_BITMAP)
+  file(TO_NATIVE_PATH "${MISUC_NSIS_ASSETS_DIR}/header.bmp"
+    CPACK_NSIS_MUI_HEADERIMAGE)
   set(CPACK_NSIS_BRANDING_TEXT "Misuc Installer")
   set(CPACK_NSIS_WELCOME_TITLE "Misuc ${CPACK_PACKAGE_VERSION}")
   set(CPACK_NSIS_FINISH_TITLE "Misuc is ready")

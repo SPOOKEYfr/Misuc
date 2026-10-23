@@ -194,7 +194,8 @@ set(CPACK_PACKAGE_RELEASE "1")
 set(CPACK_PACKAGE_VENDOR "Misuc")
 set(CPACK_PACKAGE_CONTACT "SPOOKEYfr <oibhupii@gmail.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Multi-track MIDI sequencer and audio workstation")
-set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE")
+get_filename_component(CPACK_RESOURCE_FILE_LICENSE
+  "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE" ABSOLUTE)
 if(WIN32)
   set(CPACK_PACKAGE_FILE_NAME "misuc-${CPACK_PACKAGE_VERSION}-${CPACK_PACKAGE_RELEASE}-win64")
   # NSIS drives the double-click installer (.exe); the ZIP stays for portable
@@ -203,7 +204,14 @@ if(WIN32)
   # ── Misuc-themed NSIS wizard ─────────────────────────────────────────────
   # Shell-facing art lives in assets/nsis/ (bitmaps are exact-size PNG->BMP3
   # renders from assets/nsis/make_assets.sh).
-  set(MISUC_NSIS_ASSETS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../assets/nsis")
+  #
+  # makensis `File` cannot resolve embedded ".." path elements, so the asset
+  # dir must be a fully-resolved ABSOLUTE path with native separators (the
+  # "${dir}/../assets/nsis" form is exactly what made the first themed build
+  # fail with "File ... -> no files found" on the Actions runner).
+  get_filename_component(MISUC_NSIS_ASSETS_DIR
+    "${CMAKE_CURRENT_SOURCE_DIR}/../assets/nsis" ABSOLUTE)
+  file(TO_NATIVE_PATH "${MISUC_NSIS_ASSETS_DIR}" MISUC_NSIS_ASSETS_DIR)
   set(CPACK_NSIS_MUI_ICON "${MISUC_NSIS_ASSETS_DIR}/misuc.ico")
   set(CPACK_NSIS_MUI_UNIICON "${MISUC_NSIS_ASSETS_DIR}/misuc.ico")
   set(CPACK_NSIS_MUI_WELCOMEFINISHPAGE_BITMAP "${MISUC_NSIS_ASSETS_DIR}/welcome.bmp")

@@ -36,7 +36,11 @@ target_link_libraries(misuc_headroom PRIVATE misuc_engine)
 add_test(NAME misuc_tests COMMAND misuc_tests)
 add_executable(misuc_flp ../tools/flp_dump.cpp)
 target_link_libraries(misuc_flp PRIVATE misuc_engine)
-install(TARGETS misuc_flp RUNTIME DESTINATION bin)
+# Linux-only tool install: keep the Windows installer tree flat (bin/ would
+# nest a stray misuc_flp.exe next to windeployqt's plugin dirs).
+if(NOT WIN32)
+  install(TARGETS misuc_flp RUNTIME DESTINATION bin)
+endif()
 
 add_executable(misuc_tests_flp test_flp.cpp)
 target_link_libraries(misuc_tests_flp PRIVATE misuc_engine)

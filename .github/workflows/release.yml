@@ -46,6 +46,18 @@ jobs:
           cd build
           cpack -C Release -G DEB
 
+      - name: "Smoke - install .deb and launch the app"
+        run: |
+          sudo apt-get install -y ./build/misuc_*.deb
+          dpkg -l misuc | grep -E "^ii" || (echo "dpkg did not report misuc installed" && exit 1)
+          test -x /usr/bin/misuc_app || (echo "/usr/bin/misuc_app missing" && exit 1)
+          test -f /usr/share/applications/misuc.desktop || (echo "desktop entry missing" && exit 1)
+          test -f /usr/share/metainfo/misuc.appdata.xml || (echo "appstream metadata missing" && exit 1)
+          QT_QPA_PLATFORM=offscreen timeout 6 misuc_app; rc=$?
+          if [ "$rc" != "0" ] && [ "$rc" != "124" ]; then
+            echo "misuc_app exited with rc $rc"; exit 1
+          fi
+
       - name: Upload .deb artifact
         uses: actions/upload-artifact@v4
         with:
@@ -109,6 +121,33 @@ jobs:
           cd build
           cpack -C Release -G NSIS
 
+      - name: "Smoke - silent-install, verify payload, launch, uninstall"
+        shell: pwsh
+        run: |
+          $exe = (Get-ChildItem build\misuc-*win64.exe | Select-Object -First 1).FullName
+          if (-not $exe) { throw "no NSIS installer was produced" }
+          $dest = 'C:\misuc_ci_install'
+          $p = Start-Process -FilePath $exe -ArgumentList "/S", "/D=$dest" -Wait -PassThru
+          if ($p.ExitCode -ne 0) { throw "installer exited with $($p.ExitCode)" }
+          foreach ($f in 'misuc_app.exe', 'Qt6Core.dll', 'Qt6Widgets.dll',
+                        'libsndfile-1.dll', 'zlib1.dll', 'vcruntime140.dll',
+                        'msvcp140.dll', 'platforms\qwindows.dll',
+                        'imageformats\qgif.dll') {
+            if (-not (Test-Path (Join-Path $dest $f))) {
+              throw "installer payload missing: $f"
+            }
+          }
+          $app = Start-Process -FilePath (Join-Path $dest 'misuc_app.exe') -PassThru
+          Start-Sleep -Seconds 6
+          if ($app.HasExited) { throw "misuc_app.exe exited after launch" }
+          Stop-Process -Id $app.Id -Force
+          $un = Join-Path $dest 'Uninstall.exe'
+          if (-not (Test-Path $un)) { throw "Uninstall.exe missing" }
+          Start-Process -FilePath $un -ArgumentList "/S", "_?=$dest" -Wait
+          if (Test-Path (Join-Path $dest 'misuc_app.exe')) {
+            throw "uninstall did not remove misuc_app.exe"
+          }
+
       - name: Upload .exe artifact
         uses: actions/upload-artifact@v4
         with:
@@ -131,21 +170,29 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           ls -l release-assets
+          VER="${GITHUB_REF_NAME#v}"
           cat > notes.md <<'EOF'
-          Misuc ${{ github.ref_name }}
+          Misuc vXVER
 
           Platform installers and packages:
 
-          - `misuc_0.3.0-1_amd64.deb` — **Linux installer (.deb)** for
-            Debian/Ubuntu: `sudo apt install ./misuc_0.3.0-1_amd64.deb`
-          - `misuc-0.3.0-1-win64.exe` — **Windows installer (.exe)** double
-            click to run the setup wizard (installs into
-            `C:\Program Files\Misuc`)
+          - `misuc_XVER-1_amd64.deb` — **Linux installer (.deb)** for
+            Debian/Ubuntu: `sudo apt install ./misuc_XVER-1_amd64.deb`
+                          (refreshes menu/desktop caches via dpkg triggers)
+          - `misuc-XVER-1-win64.exe` — **Windows installer (.exe)** double
+            click to run the themed setup wizard (installs into
+            `C:\Program Files\Misuc`, adds Start Menu + Desktop shortcuts,
+            and offers "Launch Misuc" on the finish page). The installer
+            carries the Qt runtime, the MSVC redist, and every codec DLL —
+            no external dependencies on Windows.
 
-          Notes: this is the first release that installs on Windows. Audio
-          behaviour on real hardware is not yet validated; the engine, UI and
-          packaged test suites run green in CI for both platforms.
+          Notes: the v0.3.0 Windows installer shipped without the engine's
+          codec/redist DLLs and failed to start on clean machines; vXVER is
+          the fixed release with an end-to-end smoke-tested install
+          (silent install + app launch + uninstall verified in CI). Audio
+          behaviour on real Windows hardware is not yet validated.
           EOF
+          sed -i "s/XVER/$VER/g" notes.md
           files=$(find release-assets -type f \( -name "*.deb" -o -name "*.exe" \) -printf "%p ")
           repo_args=(--repo "$GITHUB_REPOSITORY")
           if ! gh release create "$GITHUB_REF_NAME" "${repo_args[@]}" \

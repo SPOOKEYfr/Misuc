@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata so GNOME Software / Discover present Misuc at
+     store quality (logo, license, launchable, release history). -->
+<component type="desktop-application">
+  <id>misuc.desktop</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Misuc</name>
+  <summary>Multi-track MIDI sequencer and audio workstation</summary>
+  <description>
+    <p>
+      Misuc is a digital audio workstation built around the pattern workflow:
+      a full-range piano roll with snap quantise, an arrangement playlist, and
+      a live mixer with buses and per-track FX chains (LV2 hosting on Linux).
+    </p>
+    <p>
+      Quality-of-life is part of the contract: session autosaves you can
+      actually recover from, 50-step undo/redo, sample-accurate rendering,
+      and a live PipeWire engine on Linux (WASAPI on Windows).
+    </p>
+  </description>
+  <launchable type="desktop-id">misuc.desktop</launchable>
+  <url type="homepage">https://github.com/SPOOKEYfr/Misuc</url>
+  <provides>
+    <binary>misuc_app</binary>
+    <binary>misuc_flp</binary>
+  </provides>
+  <categories>
+    <category>AudioVideo</category>
+    <category>Audio</category>
+    <category>Music</category>
+    <category>AudioVideoEditing</category>
+  </categories>
+  <releases>
+    <release version="0.3.1" date="2026-10-20">
+      <description>
+        <p>Installer refresh: the Windows installer now carries the full
+        runtime (Qt + MSVC redist + codec DLLs) and a themed NSIS wizard;
+        the Debian package gained proper maintainer scripts and AppStream
+        metadata.</p>
+      </description>
+    </release>
+    <release version="0.3.0" date="2026-10-20">
+      <description>
+        <p>First Windows-capable release. Installer issues were reported on
+        real machines and fixed in 0.3.1.</p>
+      </description>
+    </release>
+    <release version="0.2.0" date="2026-09-12"/>
+  </releases>
+</component>

@@ -1,9 +1,16 @@
 cmake_minimum_required(VERSION 3.20)
 
 project(misuc
-  VERSION 0.3.0
+  VERSION 0.3.1
   DESCRIPTION "Misuc - Multi-track MIDI sequencer and audio workstation"
   LANGUAGES C CXX)
+
+# Windows-only resource language for the misuc_app shell icon/versioninfo
+# (.rc compiled by rc.exe under the VS toolchain; on Linux the RC toolset
+# does not exist).
+if(WIN32)
+  enable_language(RC)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

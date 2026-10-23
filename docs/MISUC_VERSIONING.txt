@@ -3,7 +3,7 @@ MISUC VERSIONING
 
 App version
 -----------
-  Current version:  0.3.0
+  Current version:  0.3.1
   Single source of truth: `project(misuc VERSION ...)` in the top-level
   `CMakeLists.txt`. CMake generates `ui/src/branding/MisucVersion.h` from
   `ui/src/branding/MisucVersion.h.in`, and `ui/src/main.cpp` seeds both

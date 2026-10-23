@@ -1,0 +1,14 @@
+#!/bin/sh
+# Refresh the desktop/icon caches after Misuc lands on disk, so the menu
+# entry and icon show up without a logout. Never fail the upgrade because a
+# cache tool is missing on this desktop.
+set -e
+
+if command -v update-desktop-database >/dev/null 2>&1; then
+  update-desktop-database -q /usr/share/applications || true
+fi
+if command -v gtk-update-icon-cache >/dev/null 2>&1; then
+  gtk-update-icon-cache -qf /usr/share/icons/hicolor || true
+fi
+
+exit 0

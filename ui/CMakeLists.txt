@@ -165,6 +165,7 @@ if(WIN32)
     file(GLOB MISUC_VCPKG_RUNTIME_DLLS
          "${VCPKG_INSTALLED_DIR}/x64-windows/bin/*.dll")
     if(MISUC_VCPKG_RUNTIME_DLLS)
+      message(STATUS "vcpkg runtime DLLs: ${MISUC_VCPKG_RUNTIME_DLLS}")
       install(FILES ${MISUC_VCPKG_RUNTIME_DLLS} DESTINATION .)
     else()
       message(FATAL_ERROR "vcpkg x64-windows/bin has no DLLs - check the vcpkg install step")

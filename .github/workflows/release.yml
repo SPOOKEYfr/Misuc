@@ -95,6 +95,8 @@ jobs:
           & "$env:GITHUB_WORKSPACE\vcpkg\vcpkg.exe"
           --triplet x64-windows
           --x-install-root="$env:GITHUB_WORKSPACE\vcpkg\installed" install
+          Get-ChildItem "$env:GITHUB_WORKSPACE\vcpkg\installed\x64-windows\bin" -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty Name
 
       - name: Install NSIS (CPack .exe generator)
         shell: pwsh
@@ -145,10 +147,15 @@ jobs:
           foreach ($f in 'misuc_app.exe', 'Qt6Core.dll', 'Qt6Widgets.dll',
                         'libsndfile-1.dll', 'zlib1.dll', 'vcruntime140.dll',
                         'msvcp140.dll', 'platforms\qwindows.dll',
-                        'imageformats\qgif.dll') {
-            if (-not (Test-Path (Join-Path $dest $f))) {
-              throw "installer payload missing: $f"
-            }
+              'imageformats\qgif.dll') {
+    if (-not (Test-Path "$dest\$f")) {
+      if (Test-Path $dest) {
+        Write-Host "===== payload listing ($dest) ====="
+        Get-ChildItem $dest -Recurse -File | Select-Object -ExpandProperty FullName
+      } else { Write-Host "install dir missing: $dest" }
+      throw "installer payload missing: $f"
+    }
+  }
           }
           $app = Start-Process -FilePath (Join-Path $dest 'misuc_app.exe') -PassThru
           Start-Sleep -Seconds 6

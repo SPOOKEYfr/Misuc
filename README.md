@@ -63,8 +63,8 @@ Prebuilt installers are attached to tagged GitHub Releases
 
 | Platform | File | How to install |
 | --- | --- | --- |
-| Linux (.deb) | `misuc_0.3.0-1_amd64.deb` | `sudo apt install ./misuc_0.3.0-1_amd64.deb` |
-| Windows (.exe) | `misuc-0.3.0-1-win64.exe` | Double-click the installer (installs into `C:\Program Files\Misuc`) |
+| Linux (.deb) | `misuc_0.3.1-1_amd64.deb` | `sudo apt install ./misuc_0.3.1-1_amd64.deb` |
+| Windows (.exe) | `misuc-0.3.1-1-win64.exe` | Double-click the installer (installs into `C:\Program Files\Misuc`) |
 
 The Windows audio backend (WASAPI) has not been validated on real hardware
 yet — on Linux, Misuc talks to a running PipeWire daemon.

@@ -196,7 +196,10 @@ set(CPACK_PACKAGE_CONTACT "SPOOKEYfr <oibhupii@gmail.com>")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Multi-track MIDI sequencer and audio workstation")
 get_filename_component(CPACK_RESOURCE_FILE_LICENSE
   "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE" ABSOLUTE)
-file(TO_NATIVE_PATH "${CPACK_RESOURCE_FILE_LICENSE}" CPACK_RESOURCE_FILE_LICENSE)
+# NOTE: leave the license path forward-slashed. CPack.cmake pastes this value
+# into its own CMake code (cpack_check_file_exists), where an unquoted
+# "D:\a\..." explodes with "Invalid character escape '\a'". The NSIS
+# generator, in contrast, accepts forward slashes for LicenseData lines.
 if(WIN32)
   set(CPACK_PACKAGE_FILE_NAME "misuc-${CPACK_PACKAGE_VERSION}-${CPACK_PACKAGE_RELEASE}-win64")
   # NSIS drives the double-click installer (.exe); the ZIP stays for portable

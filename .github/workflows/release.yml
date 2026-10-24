@@ -155,9 +155,24 @@ jobs:
               throw "installer payload missing: $f"
             }
           }
-          $app = Start-Process -FilePath (Join-Path $dest 'misuc_app.exe') -PassThru
+          $outLog = Join-Path $env:GITHUB_WORKSPACE 'misuc_app_stdout.txt'
+          $errLog = Join-Path $env:GITHUB_WORKSPACE 'misuc_app_stderr.txt'
+          $app = Start-Process -FilePath (Join-Path $dest 'misuc_app.exe') `
+            -RedirectStandardOutput $outLog -RedirectStandardError $errLog -PassThru
           Start-Sleep -Seconds 6
-          if ($app.HasExited) { throw "misuc_app.exe exited after launch" }
+          if ($app.HasExited) {
+            Write-Host "misuc_app.exe exit code: 0x$('{0:X8}' -f $app.ExitCode)"
+            Write-Host "--- stdout (tail) ---"
+            if (Test-Path $outLog) { Get-Content $outLog -Tail 40 }
+            Write-Host "--- stderr (tail) ---"
+            if (Test-Path $errLog) { Get-Content $errLog -Tail 40 }
+            $dumpbin = Get-ChildItem 'C:\Program Files\Microsoft Visual Studio\2022\*\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($dumpbin) {
+              Write-Host "--- imports ---"
+              & $dumpbin.FullName /nologo /dependents (Join-Path $dest 'misuc_app.exe')
+            }
+            throw "misuc_app.exe exited after launch"
+          }
           Stop-Process -Id $app.Id -Force
           $un = Join-Path $dest 'Uninstall.exe'
           if (-not (Test-Path $un)) { throw "Uninstall.exe missing" }

@@ -177,9 +177,9 @@ if(WIN32)
   # them the app dies at startup on machines without the VC++ runtime.
   if(MSVC)
     get_filename_component(_misuc_msvc_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    # .../VC/Tools/MSVC/<ver>/bin/Hostx64/x64 -> .../VC
+    # .../VC/Tools/MSVC/<ver>/bin/Hostx64/x64 -> .../VC (five levels up)
     get_filename_component(_misuc_vc_dir
-      "${_misuc_msvc_bin}/../../../.." ABSOLUTE)
+      "${_misuc_msvc_bin}/../../../../.." ABSOLUTE)
     file(GLOB MISUC_MSVC_CRT_DLLS
          "${_misuc_vc_dir}/Redist/MSVC/*/x64/Microsoft.VC*.CRT/*.dll")
     if(MISUC_MSVC_CRT_DLLS)

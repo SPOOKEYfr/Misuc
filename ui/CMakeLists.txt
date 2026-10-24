@@ -171,6 +171,26 @@ if(WIN32)
       message(FATAL_ERROR "vcpkg x64-windows/bin has no DLLs - check the vcpkg install step")
     endif()
   endif()
+  # MSVC CRT redist: windeployqt's --compiler-runtime is unreliable (it
+  # silently skipped vcruntime140/msvcp140 on the Actions runner), so the
+  # redist DLLs are staged straight from the toolchain's Redist tree. Without
+  # them the app dies at startup on machines without the VC++ runtime.
+  if(MSVC)
+    get_filename_component(_misuc_msvc_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    # .../VC/Tools/MSVC/<ver>/bin/Hostx64/x64 -> .../VC
+    get_filename_component(_misuc_vc_dir
+      "${_misuc_msvc_bin}/../../../.." ABSOLUTE)
+    file(GLOB MISUC_MSVC_CRT_DLLS
+         "${_misuc_vc_dir}/Redist/MSVC/*/x64/Microsoft.VC*.CRT/*.dll")
+    if(MISUC_MSVC_CRT_DLLS)
+      message(STATUS "MSVC CRT DLLs: ${MISUC_MSVC_CRT_DLLS}")
+      install(FILES ${MISUC_MSVC_CRT_DLLS} DESTINATION .)
+    else()
+      message(FATAL_ERROR
+        "MSVC CRT redist not found under ${_misuc_vc_dir}/Redist/MSVC - "
+        "without it the installer cannot run on clean machines")
+    endif()
+  endif()
   install(CODE [[
     execute_process(COMMAND windeployqt --release --compiler-runtime
                             "${CMAKE_INSTALL_PREFIX}/misuc_app.exe"

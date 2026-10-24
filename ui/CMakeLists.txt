@@ -177,9 +177,17 @@ if(WIN32)
   # them the app dies at startup on machines without the VC++ runtime.
   if(MSVC)
     get_filename_component(_misuc_msvc_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
-    # .../VC/Tools/MSVC/<ver>/bin/Hostx64/x64 -> .../VC (five levels up)
-    get_filename_component(_misuc_vc_dir
-      "${_misuc_msvc_bin}/../../../../.." ABSOLUTE)
+    # Probe upward from .../VC/Tools/MSVC/<ver>/bin/Hostx64/x64 for the VC
+    # root - the depth differs between VS editions/toolset layouts.
+    set(_misuc_vc_dir "")
+    set(_misuc_probe "${_misuc_msvc_bin}")
+    foreach(_misuc_i RANGE 1 7)
+      get_filename_component(_misuc_probe "${_misuc_probe}/.." ABSOLUTE)
+      if(EXISTS "${_misuc_probe}/Redist/MSVC")
+        set(_misuc_vc_dir "${_misuc_probe}")
+        break()
+      endif()
+    endforeach()
     file(GLOB MISUC_MSVC_CRT_DLLS
          "${_misuc_vc_dir}/Redist/MSVC/*/x64/Microsoft.VC*.CRT/*.dll")
     if(MISUC_MSVC_CRT_DLLS)
@@ -187,7 +195,7 @@ if(WIN32)
       install(FILES ${MISUC_MSVC_CRT_DLLS} DESTINATION .)
     else()
       message(FATAL_ERROR
-        "MSVC CRT redist not found under ${_misuc_vc_dir}/Redist/MSVC - "
+        "MSVC CRT redist not found under ${_misuc_probe}/Redist/MSVC - "
         "without it the installer cannot run on clean machines")
     endif()
   endif()

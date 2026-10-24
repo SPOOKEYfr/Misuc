@@ -174,9 +174,9 @@ jobs:
             throw "misuc_app.exe exited after launch"
           }
           Stop-Process -Id $app.Id -Force
-          $un = Join-Path $dest 'Uninstall.exe'
-          if (-not (Test-Path $un)) { throw "Uninstall.exe missing" }
-          Start-Process -FilePath $un -ArgumentList "/S", "_?=$dest" -Wait
+          $un = Get-ChildItem $dest -Filter 'Uninstall*.exe' | Select-Object -First 1
+          if (-not $un) { throw "Uninstall.exe missing" }
+          Start-Process -FilePath $un.FullName -ArgumentList "/S", "_?=$dest" -Wait
           if (Test-Path (Join-Path $dest 'misuc_app.exe')) {
             throw "uninstall did not remove misuc_app.exe"
           }

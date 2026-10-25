@@ -63,7 +63,9 @@ target_include_directories(misuc_ui_objs PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}/src)
 target_link_libraries(misuc_ui_objs PRIVATE misuc_engine Qt6::Widgets)
 
-add_executable(misuc_app src/main.cpp)
+# WIN32 builds a GUI-subsystem binary on Windows. A plain add_executable
+# produced a console window, and closing that console also terminated Misuc.
+qt_add_executable(misuc_app WIN32 src/main.cpp)
 target_link_libraries(misuc_app PRIVATE
   misuc_ui_objs
   misuc_engine
@@ -278,6 +280,16 @@ if(WIN32)
     "Delete '$SMPROGRAMS\\Misuc\\Misuc.lnk'
      RMDir '$SMPROGRAMS\\Misuc'
      Delete '$DESKTOP\\Misuc.lnk'")
+  # Misuc Neu (Arena's QML UI) rides along as a second executable when its
+  # target was configured; classic Misuc stays the default launch/shortcut.
+  if(TARGET misuc_neu)
+    string(APPEND CPACK_NSIS_CREATE_ICONS_EXTRA
+      "\n     CreateShortCut '$SMPROGRAMS\\Misuc\\Misuc Neu.lnk' '$INSTDIR\\misuc_neu.exe'
+     CreateShortCut '$DESKTOP\\Misuc Neu.lnk' '$INSTDIR\\misuc_neu.exe'")
+    string(APPEND CPACK_NSIS_DELETE_ICONS_EXTRA
+      "\n     Delete '$SMPROGRAMS\\Misuc\\Misuc Neu.lnk'
+     Delete '$DESKTOP\\Misuc Neu.lnk'")
+  endif()
 else()
   set(CPACK_PACKAGE_FILE_NAME "misuc-${CPACK_PACKAGE_VERSION}-${CPACK_PACKAGE_RELEASE}-linux")
   set(CPACK_GENERATOR "DEB;TGZ")
